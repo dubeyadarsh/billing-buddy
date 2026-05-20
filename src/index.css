@@ -1,0 +1,59 @@
+/* src/index.css */
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+  
+  /* Refined Sophisticated Palette (Indigo/Zinc based) */
+  --color-brand-50: #eef2ff;
+  --color-brand-100: #e0e7ff;
+  --color-brand-500: #6366f1; 
+  --color-brand-600: #4f46e5; /* Primary Buttons */
+  --color-brand-800: #3730a3;
+  --color-brand-900: #312e81;
+
+  --color-surface-50: #fafafa;  /* App Background */
+  --color-surface-100: #f4f4f5; 
+  --color-surface-200: #e4e4e7; /* Borders */
+  --color-surface-500: #71717a; /* Muted Text */
+  --color-surface-800: #27272a; /* Main Text */
+  --color-surface-900: #18181b; /* Sidebar / Pure Dark */
+
+  /* Buttery Smooth Custom Animations */
+  --animate-fade-in-up: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --animate-fade-in: fadeIn 0.4s ease-out forwards;
+  --animate-scale-in: scaleIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Keyframes for the new animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@layer base {
+  body {
+    @apply bg-surface-50 text-surface-800 font-sans antialiased selection:bg-brand-500 selection:text-white overflow-hidden;
+  }
+  
+  /* Premium ultra-slim scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { 
+    @apply bg-surface-200 rounded-full transition-colors; 
+  }
+  ::-webkit-scrollbar-thumb:hover { 
+    @apply bg-surface-500; 
+  }
+}
