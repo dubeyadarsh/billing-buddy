@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Trash2, Plus, ArrowLeft, ShoppingCart, IndianRupee, Eye, Printer, X } from 'lucide-react';
-import { InvoiceTemplate } from '../components/templates/InvoiceTemplate';
+import React, { useState, useEffect } from 'react';
+import { Trash2, Plus, ArrowLeft, ShoppingCart, IndianRupee, Eye } from 'lucide-react';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
+import { INDIAN_STATES } from '../utils/messages';
 
 const INTERNAL_NOTES = [
   "Stock arrived in good condition.", "Pending quality check.", "Partial delivery received.",
@@ -14,7 +14,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [partyName, setPartyName] = useState('');
   const [phone, setPhone] = useState('');
-  const [stateOfSupply, setStateOfSupply] = useState('Maharashtra');
+  const [stateOfSupply, setStateOfSupply] = useState('');
   const [notes, setNotes] = useState('');
   
   const [inventoryItems, setInventoryItems] = useState<any[]>([]);
@@ -22,8 +22,9 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
   const [suggestedNotes, setSuggestedNotes] = useState<string[]>([]);
   const [settings, setSettings] = useState<any>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [companyDetails, setCompanyDetails] = useState<any>(null);
   
-  const [items, setItems] = useState([{ id: 1, name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0 }]);
+  const [items, setItems] = useState([{ id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }]);
   
   const [globalDiscount, setGlobalDiscount] = useState<any>(0);
   const [roundOff, setRoundOff] = useState<any>(0);
@@ -32,37 +33,27 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
   
   const [showPreview, setShowPreview] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [companyDetails, setCompanyDetails] = useState<any>(null);
 
   useEffect(() => {
     const fetchInitialData = async () => {
-      // 🐛 FIX: Updated to use the new paginated API signature!
-      const resItems = await window.electronAPI.getItems({
-        companyId: Number(companyId),
-        page: 1,
-        limit: 5000, // Fetch a large batch so the dropdown has all available items
-        searchTerm: ''
-      });
-      if (resItems.success && resItems.data) setInventoryItems(resItems.data);
+      const resItems = await window.electronAPI.getItems({ companyId: Number(companyId), page: 1, limit: 5000, searchTerm: '' });
+      if (resItems.success) setInventoryItems(resItems.data || []);
 
       const resParties = await window.electronAPI.getParties(Number(companyId));
-      if (resParties.success && resParties.data) setPartiesList(resParties.data);
+      if (resParties.success) setPartiesList(resParties.data || []);
 
       const resSettings = await window.electronAPI.getCompanySettings(Number(companyId));
-      if (resSettings.success) setSettings(resSettings.settings);
+      if (resSettings.success) setSettings(resSettings.settings || null);
 
-      // FETCH ACCOUNTS
       const resAccounts = await window.electronAPI.getAccounts(Number(companyId));
-      if (resAccounts.success && resAccounts.data) {
-        setAccounts(resAccounts.data);
-        if (resAccounts.data.length > 0) setAccountId(resAccounts.data[0].id.toString());
+      if (resAccounts.success) {
+        setAccounts(resAccounts.data || []);
+        if (resAccounts.data && resAccounts.data.length > 0) setAccountId(resAccounts.data[0].id.toString());
       }
-      // Inside useEffect's fetchInitialData:
-const resCompany = await window.electronAPI.getCompany(Number(companyId));
-if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
+      const resCompany = await window.electronAPI.getCompany(Number(companyId));
+      if (resCompany.success) setCompanyDetails(resCompany.data || null);
     };
     fetchInitialData();
-
     const shuffled = [...INTERNAL_NOTES].sort(() => 0.5 - Math.random());
     setSuggestedNotes(shuffled.slice(0, 5));
   }, [companyId]);
@@ -106,8 +97,44 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
     if (foundParty) setPhone(foundParty.phone || '');
   };
 
-  const addRow = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0 }]);
+  const addRow = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }]);
   const removeRow = (id: number) => { if (items.length > 1) setItems(items.filter(item => item.id !== id)); };
+
+  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>, id: number) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); 
+      const scannedCode = e.currentTarget.value;
+      const targetIndex = items.findIndex(i => i.id === id);
+      if (targetIndex === -1) return;
+
+      const updatedItems = [...items];
+      let currentItem = { ...updatedItems[targetIndex] };
+      currentItem.serialNo = scannedCode;
+      currentItem.qty = 1;
+
+      const matchedItem = inventoryItems.find(i => i.item_code === scannedCode);
+      if (matchedItem) {
+        currentItem.name = matchedItem.item_name;
+        currentItem.price = matchedItem.purchase_price || 0; 
+        currentItem.taxRate = matchedItem.tax_rate || 0;
+      }
+
+      currentItem.amount = calculateRowAmount(Number(currentItem.qty), Number(currentItem.price), Number(currentItem.discount), Number(currentItem.taxRate));
+      updatedItems[targetIndex] = currentItem;
+
+      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' };
+      updatedItems.splice(targetIndex + 1, 0, newItem);
+      setItems(updatedItems);
+
+      // FIX: Safely shift focus to the newly created row manually
+      setTimeout(() => {
+        const inputs = document.querySelectorAll<HTMLInputElement>('.barcode-input');
+        if (inputs.length > 0) {
+          inputs[inputs.length - 1].focus();
+        }
+      }, 50);
+    }
+  };
 
   const subTotal = items.reduce((sum, item) => sum + (item.amount || 0), 0);
   const totalTax = items.reduce((sum, item) => sum + (((item.qty || 0) * (item.price || 0) - (item.discount || 0)) * ((item.taxRate || 0) / 100)), 0);
@@ -121,11 +148,10 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
     if (validItems.length === 0) return alert("Please add at least one item!");
 
     const payload = {
-      companyId: Number(companyId),
-      billNo: billNo || "N/A", date, partyName, phone, stateOfSupply,
+      companyId: Number(companyId), billNo: billNo || "N/A", date, partyName, phone, stateOfSupply,
       subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, roundOff: Number(roundOff || 0), grandTotal,
-      amountPaid: Number(amountPaid || 0), 
-      accountId: Number(accountId), // PASS THE BANK ACCOUNT ID TO BACKEND!
+      // FIX: Account ID strictly checked to prevent database crash when empty
+      amountPaid: Number(amountPaid || 0), accountId: accountId ? Number(accountId) : null,
       paymentType: accounts.find(a => a.id.toString() === accountId)?.account_name || 'Cash', 
       balanceDue, notes, items: validItems
     };
@@ -134,9 +160,7 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
     if (res.success) {
       setIsSaved(true);
       setShowPreview(true);
-    } else {
-      alert(res.message);
-    }
+    } else alert(res.message);
   };
 
   return (
@@ -150,6 +174,7 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
 
       <div className="flex-1 overflow-y-auto p-6">
         <div className="max-w-6xl mx-auto bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          
           <div className="p-6 border-b border-slate-200 bg-slate-50/50 grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-4">
               <div>
@@ -175,42 +200,54 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
                   <input type="date" className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none" value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
               </div>
-              <div>
+             <div>
                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">State of Supply</label>
                  <select className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none bg-white" value={stateOfSupply} onChange={(e) => setStateOfSupply(e.target.value)}>
-                   <option>Maharashtra</option><option>Gujarat</option><option>Delhi</option>
+                   <option value="" disabled>Select State</option>
+                   {INDIAN_STATES.map((state) => <option key={state} value={state}>{state}</option>)}
                  </select>
               </div>
             </div>
           </div>
 
           <div>
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-800 text-white text-xs uppercase tracking-wider">
-                  <th className="px-4 py-3 w-12 text-center">#</th><th className="px-4 py-3">Item Name</th><th className="px-4 py-3 w-24">Qty</th><th className="px-4 py-3 w-32">Price/Unit</th>
-                  <th className="px-4 py-3 w-28">Discount</th><th className="px-4 py-3 w-28">Tax %</th><th className="px-4 py-3 w-36 text-right">Amount</th><th className="px-4 py-3 w-16"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200">
-                {items.map((item, index) => (
-                  <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
-                    <td className="px-4 py-2 text-center text-slate-400 text-sm font-medium">{index + 1}</td>
-                    <td className="px-4 py-2"><input type="text" list="purchase-inventory-list" placeholder="Select item..." className="w-full px-2 py-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded outline-none" value={item.name} onChange={(e) => handleSmartNameChange(item.id, e.target.value)} /></td>
-                    <td className="px-4 py-2"><input type="number" min="1" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-center" value={item.qty || ''} onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)} /></td>
-                    <td className="px-4 py-2"><input type="number" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-right" value={item.price || ''} onChange={(e) => handleItemChange(item.id, 'price', e.target.value)} /></td>
-                    <td className="px-4 py-2"><div className="relative"><span className="absolute left-2 top-1.5 text-slate-400 text-sm">₹</span><input type="number" className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500" value={item.discount || ''} onChange={(e) => handleItemChange(item.id, 'discount', e.target.value)} /></div></td>
-                    <td className="px-4 py-2">
-                      <select className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 bg-white" value={item.taxRate} onChange={(e) => handleItemChange(item.id, 'taxRate', e.target.value)}>
-                        <option value="0">None</option><option value="5">GST@5%</option><option value="12">GST@12%</option><option value="18">GST@18%</option><option value="28">GST@28%</option>
-                      </select>
-                    </td>
-                    <td className="px-4 py-2 text-right font-bold text-slate-700">₹{item.amount.toFixed(2)}</td>
-                    <td className="px-4 py-2 text-center"><button onClick={() => removeRow(item.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="Remove row"><Trash2 className="w-4 h-4" /></button></td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-800 text-white text-xs uppercase tracking-wider">
+                    <th className="px-4 py-3 w-12 text-center">#</th>
+                    <th className="px-4 py-3 min-w-[180px]">Item Name</th>
+                    <th className="px-4 py-3 w-40 text-blue-300">Serial / Barcode</th>
+                    <th className="px-4 py-3 w-20 text-center">Qty</th>
+                    <th className="px-4 py-3 w-28 text-right">Price/Unit</th>
+                    <th className="px-4 py-3 w-24 text-right">Disc.</th>
+                    <th className="px-4 py-3 w-24 text-center">Tax %</th>
+                    <th className="px-4 py-3 w-32 text-right">Amount</th>
+                    <th className="px-4 py-3 w-12"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {items.map((item, index) => (
+                    <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
+                      <td className="px-4 py-2 text-center text-slate-400 text-sm font-medium">{index + 1}</td>
+                      <td className="px-4 py-2"><input type="text" list="purchase-inventory-list" placeholder="Select item..." className="w-full px-2 py-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded outline-none" value={item.name} onChange={(e) => handleSmartNameChange(item.id, e.target.value)} /></td>
+                      {/* FIX: Removed autoFocus, added barcode-input class */}
+                      <td className="px-4 py-2"><input type="text" placeholder="Scan Barcode" className="barcode-input w-full px-2 py-1.5 border border-blue-200 focus:border-blue-500 rounded outline-none bg-blue-50/50" value={item.serialNo} onChange={(e) => handleItemChange(item.id, 'serialNo', e.target.value)} onKeyDown={(e) => handleBarcodeScan(e, item.id)} /></td>
+                      <td className="px-4 py-2"><input type="number" min="1" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-center" value={item.qty || ''} onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)} /></td>
+                      <td className="px-4 py-2"><input type="number" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-right" value={item.price || ''} onChange={(e) => handleItemChange(item.id, 'price', e.target.value)} /></td>
+                      <td className="px-4 py-2"><div className="relative"><span className="absolute left-2 top-1.5 text-slate-400 text-sm">₹</span><input type="number" className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500" value={item.discount || ''} onChange={(e) => handleItemChange(item.id, 'discount', e.target.value)} /></div></td>
+                      <td className="px-4 py-2">
+                        <select className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 bg-white" value={item.taxRate} onChange={(e) => handleItemChange(item.id, 'taxRate', e.target.value)}>
+                          <option value="0">None</option><option value="5">GST@5%</option><option value="12">GST@12%</option><option value="18">GST@18%</option><option value="28">GST@28%</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-2 text-right font-bold text-slate-700">₹{item.amount.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-center"><button onClick={() => removeRow(item.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"><Trash2 className="w-4 h-4" /></button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <datalist id="purchase-inventory-list">{inventoryItems.map(invItem => <option key={invItem.id} value={invItem.item_name}>Stock: {invItem.item_type === 'Service' ? 'N/A' : invItem.current_stock}</option>)}</datalist>
             <div className="p-4 border-t border-slate-200 bg-slate-50/50"><button onClick={addRow} className="flex items-center text-blue-600 hover:text-blue-700 font-semibold text-sm px-3 py-1.5 hover:bg-blue-50 rounded-lg"><Plus className="w-4 h-4 mr-1" /> Add Row</button></div>
           </div>
@@ -249,8 +286,8 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
                    </div>
                    <div className="flex-1">
                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Pay From</label>
-                     {/* ACCOUNTS DROPDOWN */}
                      <select className="w-full px-4 py-2 border border-slate-200 rounded-lg outline-none bg-white font-medium" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+                       <option value="" disabled>Select Account</option>
                        {accounts.map(acc => <option key={acc.id} value={acc.id}>{acc.account_name}</option>)}
                      </select>
                    </div>
@@ -271,31 +308,16 @@ if (resCompany.success && resCompany.data) setCompanyDetails(resCompany.data);
 
       {showPreview && (
         <PrintPreviewModal 
-  isOpen={showPreview} 
-  onClose={() => {
-    setShowPreview(false);
-    if (isSaved) onBack();
-  }} 
-  settings={settings}
-  invoiceData={{
-    type: 'Purchase',             // <-- Changed from 'Sale'
-    billNo: billNo,               // <-- Changed from 'invoiceNo'
-    date, 
-    partyName, 
-    phone, 
-    stateOfSupply,
-    companyDetails,
-    items: items.filter(i => i.name.trim() !== ''),
-    subTotal, 
-    globalDiscount: Number(globalDiscount || 0), 
-    totalTax, 
-    roundOff: Number(roundOff || 0), 
-    grandTotal,
-    paidAmount: Number(amountPaid || 0), // <-- Changed from 'amountReceived'
-    balanceDue, 
-    notes
-  }} 
-/>
+          isOpen={showPreview} 
+          onClose={() => { setShowPreview(false); if (isSaved) onBack(); }} 
+          settings={settings}
+          invoiceData={{
+            type: 'Purchase', billNo: billNo || 'N/A', date, partyName, phone, stateOfSupply, companyDetails,
+            items: items.filter(i => i.name.trim() !== ''),
+            subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, roundOff: Number(roundOff || 0), grandTotal,
+            paidAmount: Number(amountPaid || 0), balanceDue, notes
+          }} 
+        />
       )}
     </div>
   );

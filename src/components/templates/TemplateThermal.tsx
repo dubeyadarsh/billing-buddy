@@ -7,7 +7,6 @@ export const TemplateThermal: React.FC<{ data: InvoiceData, settings?: any }> = 
       
       {/* Store Header */}
       <div className="text-center mb-4 border-b border-dashed border-black pb-3">
-         {/* DYNAMIC LOGO FOR POS */}
          {data.companyDetails?.logo_base64 && (
             <img src={data.companyDetails.logo_base64} alt="Logo" className="w-10 h-10 object-contain mx-auto mb-2 grayscale" />
          )}
@@ -22,80 +21,67 @@ export const TemplateThermal: React.FC<{ data: InvoiceData, settings?: any }> = 
         </p>
       </div>
 
-      {/* Invoice Meta & Party Details */}
-      <div className="mb-4 text-xs">
-        <div className="flex justify-between mb-1.5">
-          <span>Date:</span>
-          <span className="font-bold">{data.date}</span>
-        </div>
-        <div className="flex justify-between mb-2">
-          <span>Bill No:</span>
-          <span className="font-bold">{data.billNo}</span>
-        </div>
-        
-        <div className="border-t border-dotted border-slate-400 pt-2 mt-2">
-          <p className="text-[10px] uppercase tracking-wider mb-0.5">Billed To:</p>
-          <p className="font-bold text-sm">
-            {data.partyName || 'Cash Customer'}
-          </p>
-          {data.phone && <p className="mt-0.5">Ph: {data.phone}</p>}
-        </div>
+      {/* Bill Meta */}
+      <div className="text-[11px] mb-3 leading-tight">
+        <p>No: {data.billNo}</p>
+        <p>Date: {data.date}</p>
+        <p className="mt-1">To: {data.partyName || 'Cash'}</p>
       </div>
 
-      {/* Items Table */}
-      <div className="mb-4">
-        <div className="flex justify-between font-bold border-b border-black pb-1 mb-2 text-xs">
-          <span className="w-[50%]">Item</span>
-          <span className="w-[20%] text-center">Qty</span>
-          <span className="w-[30%] text-right">Amt</span>
-        </div>
-        
-        <div className="space-y-2">
-          {data.items.map((item, i) => (
-            <div key={i} className="flex justify-between text-xs items-start">
-              <span className="w-[50%] pr-2 leading-tight break-words">
-                {item.name || 'Unnamed Item'}
-                {settings?.show_tax_column === 1 && item.taxRate > 0 && <span className="text-[9px] block text-slate-500">Tax: {item.taxRate}%</span>}
-              </span>
-              <span className="w-[20%] text-center">{item.qty}</span>
-              <span className="w-[30%] text-right font-medium">
-                {item.amount.toFixed(2)}
-              </span>
-            </div>
+      {/* Items List */}
+      <table className="w-full text-[11px] mb-3 border-y border-dashed border-black py-2 block">
+        <thead className="w-full block pb-1 border-b border-black">
+          <tr className="flex">
+            <th className="text-left flex-1 font-normal">Item</th>
+            <th className="text-right w-8 font-normal">Qty</th>
+            <th className="text-right w-16 font-normal">Amt</th>
+          </tr>
+        </thead>
+        <tbody className="w-full block pt-1">
+          {data.items.map((item, idx) => (
+            <tr key={idx} className="flex flex-wrap mb-1.5">
+              <td className="text-left flex-1 break-words">
+                {item.name}
+                {(item.serialNo || item.serial_no) && (
+                  <div className="text-[9px] text-slate-500 mt-0.5">S/N: {item.serialNo || item.serial_no}</div>
+                )}
+              </td>
+              <td className="text-right w-8 align-top">{item.qty}</td>
+              <td className="text-right w-16 align-top">{(item.amount || 0).toFixed(2)}</td>
+            </tr>
           ))}
-        </div>
-      </div>
+        </tbody>
+      </table>
 
-      {/* Financial Totals */}
-      <div className="border-t border-dashed border-black pt-2 text-xs">
+      {/* Totals */}
+      <div className="text-[11px] text-right">
         <div className="flex justify-between mb-1">
-          <span>Subtotal:</span>
+          <span>SubTotal:</span>
           <span>{data.subTotal.toFixed(2)}</span>
         </div>
-        <div className="flex justify-between mb-1">
-          <span>GST/Tax:</span>
-          <span>{data.totalTax.toFixed(2)}</span>
-        </div>
         {data.globalDiscount > 0 && (
-          <div className="flex justify-between mb-1 text-slate-700">
+          <div className="flex justify-between mb-1">
             <span>Discount:</span>
             <span>-{data.globalDiscount.toFixed(2)}</span>
           </div>
         )}
+        <div className="flex justify-between mb-1">
+          <span>Tax:</span>
+          <span>{data.totalTax.toFixed(2)}</span>
+        </div>
         {data.roundOff !== 0 && (
           <div className="flex justify-between mb-1 text-slate-700">
             <span>Round Off:</span>
             <span>{data.roundOff > 0 ? '+' : ''}{data.roundOff.toFixed(2)}</span>
           </div>
         )}
-        
         <div className="flex justify-between font-bold text-lg mt-2 border-y border-black py-2">
           <span>TOTAL:</span>
           <span>₹{data.grandTotal.toFixed(2)}</span>
         </div>
       </div>
 
-      {/* Notes & Bank Info (Thermal-friendly format) */}
+      {/* Notes & Bank Info */}
       <div className="mt-4 text-[10px]">
         {settings?.show_notes === 1 && data.notes && (
           <div className="mb-2">
@@ -103,7 +89,6 @@ export const TemplateThermal: React.FC<{ data: InvoiceData, settings?: any }> = 
             <p className="leading-tight whitespace-pre-wrap">{data.notes}</p>
           </div>
         )}
-        
         {settings?.show_bank_details === 1 && settings?.bank_details_text && (
           <div className="mt-2 border border-slate-300 p-1.5 rounded">
             <p className="font-bold text-[9px] uppercase">Bank Details:</p>
@@ -112,12 +97,10 @@ export const TemplateThermal: React.FC<{ data: InvoiceData, settings?: any }> = 
         )}
       </div>
 
-      {/* Footer */}
-      <div className="text-center mt-6 pt-4 border-t border-dotted border-slate-400">
-        <p className="text-xs font-bold">Thank you for visiting!</p>
-        <p className="text-[9px] mt-1 text-slate-600">Powered by BillingBuddy</p>
+      <div className="text-center mt-6 pt-4 border-t border-dashed border-black">
+        <p className="text-[10px] font-bold">THANK YOU</p>
+        <p className="text-[9px]">Visit Again</p>
       </div>
-      
     </div>
   );
-};
+}

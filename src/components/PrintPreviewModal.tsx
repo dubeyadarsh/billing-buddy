@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { createPortal } from 'react-dom'; // <-- 1. Import createPortal
+import { createPortal } from 'react-dom';
 import { X, Printer, LayoutTemplate } from 'lucide-react';
 import { InvoiceTemplate } from './templates/InvoiceTemplate';
 import { TemplateModern } from './templates/TemplateModern';
@@ -18,11 +18,29 @@ export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, 
 
   if (!isOpen) return null;
 
-  // 2. Assign the modal JSX to a variable
   const modalContent = (
-    // Changed z-[150] to z-[9999] for absolute safety
-    <div className="fixed inset-0 z-[9999] flex bg-slate-900/60 backdrop-blur-sm print:bg-white print:backdrop-blur-none animate-in fade-in">
+    <div className="fixed inset-0 z-[9999] flex bg-slate-900/60 backdrop-blur-sm print:static print:block print:h-auto print:bg-white print:backdrop-blur-none animate-in fade-in">
       
+      {/* CRITICAL FIX: 
+        This style block applies only during printing. It allows multi-page scrolling 
+        and explicitly hides the background app (#root) so it doesn't bleed into the PDF.
+      */}
+      <style>
+        {`
+          @media print {
+            html, body {
+              overflow: visible !important;
+              height: auto !important;
+              display: block !important;
+              background: white !important;
+            }
+            #root {
+              display: none !important;
+            }
+          }
+        `}
+      </style>
+
       {/* Sidebar Controls */}
       <div className="w-80 bg-white h-full shadow-2xl flex flex-col print:hidden z-10">
         <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
@@ -66,7 +84,7 @@ export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, 
       </div>
 
       {/* Canvas Area */}
-      <div className="flex-1 overflow-y-auto p-12 flex items-start justify-center print:p-0 print:m-0 print:overflow-visible bg-slate-200/50">
+      <div className="flex-1 overflow-y-auto p-12 flex items-start justify-center print:block print:h-auto print:p-0 print:m-0 print:overflow-visible bg-slate-200/50">
         <div className="shadow-2xl print:shadow-none transition-all duration-300">
           {selectedTemplate === 'standard' && <InvoiceTemplate type={invoiceData.type || 'Sale'} data={invoiceData} settings={settings} />}
           {selectedTemplate === 'modern' && <TemplateModern data={invoiceData} settings={settings} />}
@@ -76,6 +94,5 @@ export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, 
     </div>
   );
 
-  // 3. Return the content attached to document.body
   return createPortal(modalContent, document.body);
 };

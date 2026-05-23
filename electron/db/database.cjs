@@ -272,6 +272,14 @@ db.exec(`
         FOREIGN KEY (to_account_id) REFERENCES cash_bank_accounts(id) ON DELETE CASCADE
     );
 `);
+try {
+    // Add columns if they don't exist yet
+    db.exec(`ALTER TABLE invoice_items ADD COLUMN serial_no TEXT DEFAULT '';`);
+    db.exec(`ALTER TABLE purchase_items ADD COLUMN serial_no TEXT DEFAULT '';`);
+} catch (err) {
+    // Ignore error if column already exists
+}
+try { db.exec(`ALTER TABLE purchases ADD COLUMN account_id INTEGER;`); } catch(e) {}
 // -----------------------------------
 console.log("Database initialized at:", dbPath);
 

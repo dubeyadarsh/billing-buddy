@@ -74,7 +74,7 @@ export function TransactionHistory({ companyId }: { companyId: string }) {
         partyName: tx.party_name, 
         phone: tx.phone, 
         stateOfSupply: tx.state_of_supply,
-        items: tx.items.map((i: any) => ({ name: i.item_name, qty: i.qty, price: i.price, discount: i.discount, taxRate: i.tax_rate, amount: i.amount })),
+        items: tx.items.map((i: any) => ({ name: i.item_name, qty: i.qty, price: i.price, discount: i.discount, taxRate: i.tax_rate, amount: i.amount , serialNo: i.serial_no || '' })),
         subTotal: tx.subtotal, 
         globalDiscount: tx.global_discount, 
         totalTax: tx.total_tax, 
@@ -82,7 +82,8 @@ export function TransactionHistory({ companyId }: { companyId: string }) {
         grandTotal: tx.grand_total, 
         paidAmount: activeTab === 'sales' ? tx.amount_received : tx.amount_paid,
         balanceDue: tx.balance_due, 
-        notes: tx.notes
+        notes: tx.notes,
+        
       });
       setShowPreview(true);
       if (action === 'print') setTimeout(() => window.print(), 300);

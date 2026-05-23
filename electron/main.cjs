@@ -4,6 +4,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs'); 
 const db = require('./db/database.cjs'); // Your SQLite instance
 const { setupAutoUpdater } = require('./updater.cjs');
+const { WHATSAPP } = require('./constants.cjs'); // Import credentials
 let mainWindow;
 
 function createWindow() {
@@ -73,13 +74,15 @@ setupAutoUpdater();
 
     ipcMain.handle('send-whatsapp-otp', async (event, { contact, otp }) => {
         try {
-            const accessToken = "##YOUR_ACCESS_TOKEN##";
-                 const phoneId = "##YOUR_PHONE_NUMBER_ID##"; 
+            const accessToken = WHATSAPP.ACCESS_TOKEN;
+            const phoneId = WHATSAPP.PHONE_ID;
+            const apiVersion = WHATSAPP.API_VERSION;
+
             
             let formattedContact = contact.replace(/\D/g, '');
             if (formattedContact.length === 10) formattedContact = `91${formattedContact}`;
             console.log("Formatted Contact:", formattedContact);
-            const url = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
+            const url = `https://graph.facebook.com/${apiVersion}/${phoneId}/messages`;
             const payload = {
                 messaging_product: "whatsapp",
                 to: formattedContact,
@@ -367,11 +370,13 @@ setupAutoUpdater();
                 );
                 const newInvoiceId = info.lastInsertRowid;
 
-                const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, item_name, qty, price, discount, tax_rate, amount) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+                // UPDATED: Added serial_no column and ? parameter
+                const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, item_name, qty, price, discount, tax_rate, amount, serial_no) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
                 const updateStock = db.prepare(`UPDATE items SET current_stock = current_stock - ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
                 
                 for (const item of data.items) {
-                    insertItem.run(newInvoiceId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount);
+                    // UPDATED: Added item.serialNo || "" at the end
+                    insertItem.run(newInvoiceId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "");
                     updateStock.run(item.qty, item.name, data.companyId);
                 }
 
@@ -384,6 +389,7 @@ setupAutoUpdater();
             });
             return { success: true, id: transaction() };
         } catch (error) {
+            console.error(error);
             return { success: false, message: "Failed to save invoice." };
         }
     });
@@ -449,7 +455,31 @@ setupAutoUpdater();
             db.transaction(() => {
                 let systemNotes = []; 
 
+                let finalNotes = data.notes || '';
+                
+                // 1. First, insert the main Purchase Bill record
+                const info = db.prepare(`
+                    INSERT INTO purchases (
+                        company_id, bill_no, bill_date, party_name, phone, state_of_supply,
+                        subtotal, global_discount, total_tax, round_off, grand_total,
+                        amount_paid, account_id, payment_type, balance_due, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `).run(
+                    data.companyId, data.billNo, data.date, data.partyName, data.phone, data.stateOfSupply,
+                    data.subTotal, data.globalDiscount, data.totalTax, data.roundOff, data.grandTotal,
+                    data.amountPaid, data.accountId, data.paymentType, data.balanceDue, finalNotes
+                );
+                
+                const newPurchaseId = info.lastInsertRowid;
+
+                // 2. Insert the Purchase Items (FIXED: Added serial_no)
+                const insertPurchaseItem = db.prepare(`INSERT INTO purchase_items (purchase_id, item_name, qty, price, discount, tax_rate, amount, serial_no) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+
                 for (const item of data.items) {
+                    // Save item to purchase ledger
+                    insertPurchaseItem.run(newPurchaseId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "");
+
+                    // Update Stock & Average Price
                     const currentItem = db.prepare(`SELECT current_stock, purchase_price FROM items WHERE company_id = ? AND item_name = ?`).get(data.companyId, item.name);
                     let newAvg = Number(item.price);
                     
@@ -463,20 +493,11 @@ setupAutoUpdater();
                     }
                 }
 
-                let finalNotes = data.notes || '';
-                if (systemNotes.length > 0) finalNotes += (finalNotes ? '\n\n' : '') + '--- System Notes ---\n' + systemNotes.join('\n');
-
-                db.prepare(`
-                    INSERT INTO purchases (
-                        company_id, bill_no, bill_date, party_name, phone, state_of_supply,
-                        sub_total, global_discount, total_tax, round_off, grand_total,
-                        amount_paid, account_id, payment_type, balance_due, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `).run(
-                    data.companyId, data.billNo, data.date, data.partyName, data.phone, data.stateOfSupply,
-                    data.subTotal, data.globalDiscount, data.totalTax, data.roundOff, data.grandTotal,
-                    data.amountPaid, data.accountId, data.paymentType, data.balanceDue, finalNotes
-                );
+                // Append system notes if any average pricing occurred
+                if (systemNotes.length > 0) {
+                    const appendedNotes = finalNotes + (finalNotes ? '\n\n' : '') + '--- System Notes ---\n' + systemNotes.join('\n');
+                    db.prepare(`UPDATE purchases SET notes = ? WHERE id = ?`).run(appendedNotes, newPurchaseId);
+                }
 
                 if (data.amountPaid > 0 && data.accountId) {
                     db.prepare(`UPDATE cash_bank_accounts SET current_balance = current_balance - ? WHERE id = ? AND company_id = ?`).run(data.amountPaid, data.accountId, data.companyId);
@@ -486,6 +507,7 @@ setupAutoUpdater();
             })();
             return { success: true };
         } catch (error) {
+            console.error(error);
             return { success: false, message: "Failed to save purchase bill" };
         }
     });
