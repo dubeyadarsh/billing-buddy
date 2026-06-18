@@ -8,7 +8,6 @@ export function InvoiceTemplate({ type, data, settings }: { type: string, data: 
   const paddingClass = settings?.spacing === 'compact' ? 'p-6' : settings?.spacing === 'relaxed' ? 'p-10' : 'p-8';
   const tableCellPad = settings?.spacing === 'compact' ? 'py-2 px-3' : 'py-3 px-3';
   
-  // Safely fallback for invoice number depending on where the data came from (Live vs History)
   const displayInvoiceNo = data.billNo || data.invoice_no || data.invoiceNo || 'N/A';
   
   const qrPayload = `Type: ${type}\nRef: ${displayInvoiceNo}\nAmt: Rs.${data.grandTotal}\nTo: ${data.partyName}`;
@@ -62,17 +61,27 @@ export function InvoiceTemplate({ type, data, settings }: { type: string, data: 
         </div>
         
         <div className="text-right shrink-0 flex flex-col items-end">
+          {/* NEW: Quotation title logic */}
           <h2 className="text-2xl font-bold uppercase tracking-widest mb-3" style={{ color: settings?.primary_color || '#94a3b8' }}>
-            {type === 'Sale' ? 'TAX INVOICE' : 'PURCHASE'}
+            {data.isQuotation ? 'QUOTATION' : (type === 'Sale' ? 'TAX INVOICE' : 'PURCHASE')}
           </h2>
           <div className="bg-slate-50 border border-slate-100 p-3 rounded-xl min-w-[140px] text-left">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Invoice No.</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Ref No.</p>
             <p className="text-sm font-bold text-slate-800 mb-2">{displayInvoiceNo}</p>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Date</p>
             <p className="text-sm font-bold text-slate-800">{data.date}</p>
           </div>
         </div>
       </div>
+
+      {/* NEW: Quotation Warning Banner */}
+      {data.isQuotation && (
+        <div className="mb-6 avoid-break bg-rose-50 border border-rose-200 p-3 rounded-lg text-center">
+          <p className="text-rose-600 font-black tracking-widest uppercase text-sm">
+            ** THIS IS A QUOTATION. THIS IS NOT A VALID TAX INVOICE **
+          </p>
+        </div>
+      )}
 
       {/* BILLED TO */}
       <div className="flex justify-between mb-8 bg-slate-50 border border-slate-100 rounded-xl p-5 avoid-break">
@@ -93,8 +102,9 @@ export function InvoiceTemplate({ type, data, settings }: { type: string, data: 
             <tr className="text-white text-xs uppercase tracking-wider" style={{ backgroundColor: settings?.primary_color || '#1e293b' }}>
               <th className={`${tableCellPad} w-10 text-center rounded-tl-lg font-medium`}>#</th>
               <th className={`${tableCellPad} font-medium`}>Item Description</th>
-              {/* NEW COLUMN FOR SERIAL NUMBER */}
               <th className={`${tableCellPad} w-28 font-medium`}>Serial No.</th>
+              {/* NEW: Warranty Table Header */}
+              <th className={`${tableCellPad} w-24 font-medium`}>Warranty</th>
               <th className={`${tableCellPad} w-16 text-center font-medium whitespace-nowrap`}>Qty</th>
               <th className={`${tableCellPad} w-24 text-right font-medium whitespace-nowrap`}>Rate</th>
               {settings?.show_discount_column === 1 && <th className={`${tableCellPad} w-20 text-right font-medium whitespace-nowrap`}>Disc.</th>}
@@ -105,6 +115,7 @@ export function InvoiceTemplate({ type, data, settings }: { type: string, data: 
           <tbody>
             {data.items.map((item: any, index: number) => {
               const itemSerial = item.serialNo || item.serial_no || '';
+              const itemWarranty = item.warranty || '';
               
               return (
                 <tr key={index} className="border-b border-slate-100 text-sm avoid-break">
@@ -114,9 +125,13 @@ export function InvoiceTemplate({ type, data, settings }: { type: string, data: 
                     {item.name || item.item_name}
                   </td>
                   
-                  {/* DEDICATED SERIAL NUMBER CELL */}
                   <td className={`${tableCellPad} text-slate-600 break-words align-top font-mono text-xs`}>
                     {itemSerial ? itemSerial : <span className="text-slate-300">-</span>}
+                  </td>
+
+                  {/* NEW: Warranty Table Cell */}
+                  <td className={`${tableCellPad} text-slate-600 break-words align-top text-xs`}>
+                    {itemWarranty ? itemWarranty : <span className="text-slate-300">-</span>}
                   </td>
                   
                   <td className={`${tableCellPad} text-center text-slate-700 align-top`}>{item.qty}</td>

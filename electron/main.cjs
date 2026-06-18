@@ -357,12 +357,16 @@ setupAutoUpdater();
     ipcMain.handle('add-invoice', async (event, data) => {
         try {
             const transaction = db.transaction(() => {
+                const partyExists = db.prepare(`SELECT id FROM parties WHERE company_id = ? AND name = ? COLLATE NOCASE`).get(data.companyId, data.partyName);
+            if (!partyExists && data.partyName) {
+                db.prepare(`INSERT INTO parties (company_id, name, phone, party_type) VALUES (?, ?, ?, 'Customer')`).run(data.companyId, data.partyName, data.phone || '');
+            }
                 const info = db.prepare(`
-                    INSERT INTO invoices (
-                        company_id, invoice_no, invoice_date, party_name, phone, state_of_supply,
-                        subtotal, global_discount, total_tax, round_off, grand_total,
-                        amount_received, payment_type, balance_due, notes
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   INSERT INTO invoices (
+                    company_id, invoice_no, invoice_date, party_name, phone, state_of_supply,
+                    subtotal, global_discount, total_tax, round_off, grand_total,
+                    amount_received, payment_type, balance_due, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `).run(
                     data.companyId, data.invoiceNo, data.date, data.partyName, data.phone, data.stateOfSupply,
                     data.subTotal, data.globalDiscount, data.totalTax, data.roundOff, data.grandTotal,
@@ -370,14 +374,12 @@ setupAutoUpdater();
                 );
                 const newInvoiceId = info.lastInsertRowid;
 
-                // UPDATED: Added serial_no column and ? parameter
-                const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, item_name, qty, price, discount, tax_rate, amount, serial_no) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-                const updateStock = db.prepare(`UPDATE items SET current_stock = current_stock - ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
-                
+                const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, item_name, qty, price, discount, tax_rate, amount, serial_no, warranty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+            const updateStock = db.prepare(`UPDATE items SET current_stock = current_stock - ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
                 for (const item of data.items) {
                     // UPDATED: Added item.serialNo || "" at the end
-                    insertItem.run(newInvoiceId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "");
-                    updateStock.run(item.qty, item.name, data.companyId);
+                   insertItem.run(newInvoiceId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "", item.warranty || "");
+                updateStock.run(item.qty, item.name, data.companyId);
                 }
 
                 if (data.amountReceived > 0 && data.accountId) {
@@ -394,19 +396,33 @@ setupAutoUpdater();
         }
     });
 
-    ipcMain.handle('get-invoices', async (event, companyId) => {
+    ipcMain.handle('get-invoices', async (event, params) => {
         try {
+            const page = params.page || 1;
+            const limit = params.limit || 8;
+            const offset = (page - 1) * limit;
+            const search = `%${params.searchTerm || ''}%`;
+
+            // 1. Get total count for pagination math
+            const countQuery = db.prepare(`
+                SELECT COUNT(*) as total FROM invoices 
+                WHERE company_id = ? AND (party_name LIKE ? OR invoice_no LIKE ?)
+            `).get(params.companyId, search, search);
+
+            // 2. Fetch only the requested 8 items
             const invoices = db.prepare(`
                 SELECT i.*, 
                        IFNULL(SUM(pr.amount), 0) as total_paid_later,
                        (i.grand_total - i.amount_received - IFNULL(SUM(pr.amount), 0)) as live_balance_due
                 FROM invoices i
                 LEFT JOIN payment_receipts pr ON i.id = pr.invoice_id
-                WHERE i.company_id = ? 
+                WHERE i.company_id = ? AND (i.party_name LIKE ? OR i.invoice_no LIKE ?)
                 GROUP BY i.id
                 ORDER BY i.created_at DESC
-            `).all(companyId);
-            return { success: true, data: invoices };
+                LIMIT ? OFFSET ?
+            `).all(params.companyId, search, search, limit, offset);
+
+            return { success: true, data: invoices, total: countQuery.total };
         } catch (error) {
             return { success: false, message: "Failed to fetch invoices." };
         }
@@ -456,7 +472,11 @@ setupAutoUpdater();
                 let systemNotes = []; 
 
                 let finalNotes = data.notes || '';
-                
+                const partyExists = db.prepare(`SELECT id FROM parties WHERE company_id = ? AND name = ? COLLATE NOCASE`).get(data.companyId, data.partyName);
+            if (!partyExists && data.partyName) {
+                db.prepare(`INSERT INTO parties (company_id, name, phone, party_type) VALUES (?, ?, ?, 'Supplier')`).run(data.companyId, data.partyName, data.phone || '');
+                systemNotes.push(`Auto-added ${data.partyName} to Master Parties.`);
+            }
                 // 1. First, insert the main Purchase Bill record
                 const info = db.prepare(`
                     INSERT INTO purchases (
@@ -473,24 +493,26 @@ setupAutoUpdater();
                 const newPurchaseId = info.lastInsertRowid;
 
                 // 2. Insert the Purchase Items (FIXED: Added serial_no)
-                const insertPurchaseItem = db.prepare(`INSERT INTO purchase_items (purchase_id, item_name, qty, price, discount, tax_rate, amount, serial_no) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-
+                const insertPurchaseItem = db.prepare(`INSERT INTO purchase_items (purchase_id, item_name, qty, price, discount, tax_rate, amount, serial_no, warranty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
                 for (const item of data.items) {
                     // Save item to purchase ledger
-                    insertPurchaseItem.run(newPurchaseId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "");
-
+insertPurchaseItem.run(newPurchaseId, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "", item.warranty || "");
                     // Update Stock & Average Price
-                    const currentItem = db.prepare(`SELECT current_stock, purchase_price FROM items WHERE company_id = ? AND item_name = ?`).get(data.companyId, item.name);
-                    let newAvg = Number(item.price);
+const currentItem = db.prepare(`SELECT current_stock, purchase_price FROM items WHERE company_id = ? AND item_name = ? COLLATE NOCASE`).get(data.companyId, item.name);                    let newAvg = Number(item.price);
                     
                     if (currentItem) {
-                        if (currentItem.current_stock > 0) {
-                            newAvg = ((currentItem.current_stock * currentItem.purchase_price) + (Number(item.qty) * newAvg)) / (currentItem.current_stock + Number(item.qty));
-                            newAvg = Math.round(newAvg * 100) / 100;
-                            if (currentItem.purchase_price !== newAvg) systemNotes.push(`Averaged price for ${item.name} to ₹${newAvg}`);
-                        }
-                        db.prepare(`UPDATE items SET current_stock = current_stock + ?, purchase_price = ? WHERE company_id = ? AND item_name = ?`).run(Number(item.qty), newAvg, data.companyId, item.name);
+                    let newAvg = Number(item.price);
+                    if (currentItem.current_stock > 0) {
+                        newAvg = ((currentItem.current_stock * currentItem.purchase_price) + (Number(item.qty) * newAvg)) / (currentItem.current_stock + Number(item.qty));
+                        newAvg = Math.round(newAvg * 100) / 100;
+                        if (currentItem.purchase_price !== newAvg) systemNotes.push(`Averaged price for ${item.name} to ₹${newAvg}`);
                     }
+                    db.prepare(`UPDATE items SET current_stock = current_stock + ?, purchase_price = ? WHERE company_id = ? AND item_name = ?`).run(Number(item.qty), newAvg, data.companyId, item.name);
+                } else {
+                    // Item doesn't exist, insert it!
+                    db.prepare(`INSERT INTO items (company_id, item_name, item_type, purchase_price, current_stock, unit) VALUES (?, ?, 'Product', ?, ?, 'PCS')`).run(data.companyId, item.name, Number(item.price), Number(item.qty));
+                    systemNotes.push(`Added missing item '${item.name}' to inventory.`);
+                }
                 }
 
                 // Append system notes if any average pricing occurred
@@ -512,11 +534,30 @@ setupAutoUpdater();
         }
     });
 
-    ipcMain.handle('get-purchases', async (event, companyId) => {
+    ipcMain.handle('get-purchases', async (event, params) => {
         try {
-            return { success: true, data: db.prepare(`SELECT id, company_id, bill_no AS invoice_no, bill_date AS invoice_date, party_name, phone, grand_total, amount_paid AS amount_received, balance_due FROM purchases WHERE company_id = ? ORDER BY created_at DESC`).all(companyId) };
+            const page = params.page || 1;
+            const limit = params.limit || 8;
+            const offset = (page - 1) * limit;
+            const search = `%${params.searchTerm || ''}%`;
+
+            const countQuery = db.prepare(`
+                SELECT COUNT(*) as total FROM purchases 
+                WHERE company_id = ? AND (party_name LIKE ? OR bill_no LIKE ?)
+            `).get(params.companyId, search, search);
+
+            const purchases = db.prepare(`
+                SELECT id, company_id, bill_no AS invoice_no, bill_date AS invoice_date, 
+                       party_name, phone, grand_total, amount_paid AS amount_received, balance_due 
+            FROM purchases 
+                WHERE company_id = ? AND (party_name LIKE ? OR bill_no LIKE ?)
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            `).all(params.companyId, search, search, limit, offset);
+
+            return { success: true, data: purchases, total: countQuery.total };
         } catch (error) {
-            return { success: false };
+            return { success: false, message: "Failed to fetch purchases." };
         }
     });
 
@@ -598,63 +639,141 @@ setupAutoUpdater();
             return { success: false, message: "Failed to load payment history." };
         }
     });
+ipcMain.handle('get-dashboard-stats', async (event, filters) => {
+    try {
+        const companyId = filters.companyId;
+        const timeRange = filters.timeRange || 'All Time';
 
-    // ==========================================
-    // 10. DASHBOARD & ANALYTICS
-    // ==========================================
-    ipcMain.handle('get-dashboard-stats', async (event, filters) => {
-        try {
-            const companyId = filters.companyId;
-            const timeRange = filters.timeRange || 'All Time';
-            let startDate = '1970-01-01'; 
-            const today = new Date();
-            
-            const formatDate = (date) => {
-                const d = new Date(date);
-                let month = '' + (d.getMonth() + 1), day = '' + d.getDate();
-                if (month.length < 2) month = '0' + month;
-                if (day.length < 2) day = '0' + day;
-                return [d.getFullYear(), month, day].join('-');
-            };
+        let startDate = '1970-01-01';
+        const today = new Date();
 
-            if (timeRange === 'Today') startDate = formatDate(today);
-            else if (timeRange === 'This Week') startDate = formatDate(new Date(today.setDate(today.getDate() - today.getDay())));
-            else if (timeRange === 'This Month') startDate = formatDate(new Date(today.getFullYear(), today.getMonth(), 1));
-            else if (timeRange === 'This Year') startDate = formatDate(new Date(today.getFullYear(), 0, 1));
+        const formatDate = (date) => {
+            const d = new Date(date);
+            let month = '' + (d.getMonth() + 1);
+            let day = '' + d.getDate();
 
-            const collected = db.prepare(`SELECT SUM(grand_total) as total FROM invoices WHERE company_id = ? AND invoice_date >= ?`).get(companyId, startDate).total || 0;
-            const toPay = db.prepare(`SELECT SUM(grand_total) as total FROM purchases WHERE company_id = ? AND bill_date >= ?`).get(companyId, startDate).total || 0;
-            
-            // DYNAMIC BALANCE FIX FOR DASHBOARD
-            const invoiceDueRaw = db.prepare(`
-                SELECT SUM(
-                    i.grand_total - i.amount_received - 
-                    IFNULL((SELECT SUM(amount) FROM payment_receipts WHERE invoice_id = i.id), 0)
-                ) as total 
-                FROM invoices i 
-                WHERE i.company_id = ? AND i.invoice_date >= ?
-            `).get(companyId, startDate);
-            const invoiceDue = invoiceDueRaw.total || 0;
-            
-            const partyReceive = db.prepare(`SELECT SUM(opening_balance) as total FROM parties WHERE company_id = ? AND balance_type = 'Receive'`).get(companyId).total || 0;
-            const due = invoiceDue + partyReceive;
+            if (month.length < 2) month = '0' + month;
+            if (day.length < 2) day = '0' + day;
 
-            let balance = 0;
-            try { balance = db.prepare(`SELECT SUM(current_balance) as total FROM cash_bank_accounts WHERE company_id = ?`).get(companyId).total || 0; } catch (e) {}
+            return [d.getFullYear(), month, day].join('-');
+        };
 
-            let limitClause = (timeRange === 'Today' || timeRange === 'This Week') ? 'LIMIT 7' : 'LIMIT 30';
-            const chartRaw = db.prepare(`SELECT invoice_date, SUM(grand_total) as sales FROM invoices WHERE company_id = ? AND invoice_date >= ? GROUP BY invoice_date ORDER BY invoice_date DESC ${limitClause}`).all(companyId, startDate);
-            
-            const chartData = chartRaw.map(row => ({
-                name: new Date(row.invoice_date).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }),
-                sales: row.sales
-            })).reverse(); 
-
-            return { success: true, stats: { collected, toPay, due, balance }, chartData };
-        } catch (error) {
-            return { success: false, message: "Failed to load dashboard stats" };
+        if (timeRange === 'Today') {
+            startDate = formatDate(today);
+        } else if (timeRange === 'This Week') {
+            startDate = formatDate(
+                new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay())
+            );
+        } else if (timeRange === 'This Month') {
+            startDate = formatDate(
+                new Date(today.getFullYear(), today.getMonth(), 1)
+            );
+        } else if (timeRange === 'This Year') {
+            startDate = formatDate(
+                new Date(today.getFullYear(), 0, 1)
+            );
         }
-    });
+
+        // TOTAL SALES
+        const collected =
+            db.prepare(`
+                SELECT SUM(grand_total) as total
+                FROM invoices
+                WHERE company_id = ?
+                AND invoice_date >= ?
+            `).get(companyId, startDate)?.total || 0;
+
+        // TOTAL PURCHASES
+        const toPay =
+            db.prepare(`
+                SELECT SUM(grand_total) as total
+                FROM purchases
+                WHERE company_id = ?
+                AND bill_date >= ?
+            `).get(companyId, startDate)?.total || 0;
+
+        // CUSTOMER DUES
+        const invoiceDue =
+            db.prepare(`
+                SELECT SUM(balance_due) as total
+                FROM invoices
+                WHERE company_id = ?
+                AND invoice_date >= ?
+            `).get(companyId, startDate)?.total || 0;
+
+        // OPENING RECEIVABLE BALANCES
+        const partyReceive =
+            db.prepare(`
+                SELECT SUM(opening_balance) as total
+                FROM parties
+                WHERE company_id = ?
+                AND balance_type = 'Receive'
+            `).get(companyId)?.total || 0;
+
+        // FINAL RECEIVABLES
+        const due = invoiceDue + partyReceive;
+
+        // CASH + BANK BALANCE
+        let balance = 0;
+
+        try {
+            balance =
+                db.prepare(`
+                    SELECT SUM(current_balance) as total
+                    FROM cash_bank_accounts
+                    WHERE company_id = ?
+                `).get(companyId)?.total || 0;
+        } catch (e) {
+            balance = 0;
+        }
+
+        // SALES CHART
+        const limitClause =
+            (timeRange === 'Today' || timeRange === 'This Week')
+                ? 'LIMIT 7'
+                : 'LIMIT 30';
+
+        const chartRaw = db.prepare(`
+            SELECT
+                invoice_date,
+                SUM(grand_total) as sales
+            FROM invoices
+            WHERE company_id = ?
+            AND invoice_date >= ?
+            GROUP BY invoice_date
+            ORDER BY invoice_date DESC
+            ${limitClause}
+        `).all(companyId, startDate);
+
+        const chartData = chartRaw
+            .map(row => ({
+                name: new Date(row.invoice_date).toLocaleDateString(
+                    'en-IN',
+                    { month: 'short', day: 'numeric' }
+                ),
+                sales: row.sales
+            }))
+            .reverse();
+
+        return {
+            success: true,
+            stats: {
+                collected,
+                toPay,
+                due,
+                balance
+            },
+            chartData
+        };
+
+    } catch (error) {
+        console.error(error);
+        return {
+            success: false,
+            message: "Failed to load dashboard stats"
+        };
+    }
+});
 
     ipcMain.handle('get-inventory-stats', async (event, companyId) => {
         try {
@@ -811,6 +930,141 @@ setupAutoUpdater();
         } catch (error) {
             console.error(error);
             return { success: false, message: "Failed to load statement." };
+        }
+    });
+
+    // ==========================================
+    // EDIT INVOICE (SALES) - FULLY FLEXIBLE
+   // ==========================================
+ // ==========================================
+    // EDIT INVOICE (SALES) - ACCURATE BALANCE LOGIC
+    // ==========================================
+  // ==========================================
+    // EDIT INVOICE (SALES) - TRUST WITH DISCREPANCY CHECK
+    // ==========================================
+    ipcMain.handle('edit-invoice', async (event, data) => {
+        try {
+            db.transaction(() => {
+                const oldInvoice = db.prepare('SELECT * FROM invoices WHERE id = ? AND company_id = ?').get(data.id, data.companyId);
+                if (!oldInvoice) throw new Error("Invoice not found");
+                
+                const oldItems = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(data.id);
+                const oldPayments = db.prepare('SELECT * FROM payment_receipts WHERE invoice_id = ?').all(data.id);
+
+                // 1. Calculate Exact Balance
+                const receiptSumObj = db.prepare('SELECT SUM(amount) as total FROM payment_receipts WHERE invoice_id = ?').get(data.id);
+                const totalFromReceipts = receiptSumObj.total || 0;
+                const exactBalanceDue = data.grandTotal - data.amountReceived - totalFromReceipts;
+
+                // --- NEW: THE DISCREPANCY CHECK ---
+                if (exactBalanceDue < 0) {
+                    throw new Error("Payment Discrepancy: The new bill total is less than the payments already collected. Please delete this invoice completely and create a new one.");
+                }
+
+                // Save Snapshot to Audit Trail
+                db.prepare(`INSERT INTO invoice_revisions (invoice_id, previous_data, edit_reason) VALUES (?, ?, ?)`).run(
+                    data.id, 
+                    JSON.stringify({ invoice: oldInvoice, items: oldItems, payments: oldPayments }), 
+                    data.editReason || 'User edited bill amount and details'
+                );
+
+                // REVERT Old Stock
+                const revertStock = db.prepare(`UPDATE items SET current_stock = current_stock + ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
+                for (const item of oldItems) { 
+                    revertStock.run(item.qty, item.item_name, data.companyId); 
+                }
+
+                // Update Invoice Main Record
+                db.prepare(`
+                    UPDATE invoices SET 
+                        invoice_no=?, invoice_date=?, party_name=?, phone=?, state_of_supply=?, 
+                        subtotal=?, global_discount=?, total_tax=?, round_off=?, 
+                        grand_total=?, amount_received=?, payment_type=?, balance_due=?, notes=?
+                    WHERE id=?
+                `).run(
+                    data.invoiceNo, data.date, data.partyName, data.phone, data.stateOfSupply, 
+                    data.subTotal, data.globalDiscount, data.totalTax, data.roundOff, 
+                    data.grandTotal, data.amountReceived, data.paymentType, exactBalanceDue, data.notes, 
+                    data.id
+                );
+
+                // Delete Old Items & DEDUCT New Stock
+                db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(data.id);
+                const insertItem = db.prepare(`INSERT INTO invoice_items (invoice_id, item_name, qty, price, discount, tax_rate, amount, serial_no, warranty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+                const deductStock = db.prepare(`UPDATE items SET current_stock = current_stock - ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
+                
+                for (const item of data.items) {
+                    insertItem.run(data.id, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "", item.warranty || "");
+                    deductStock.run(item.qty, item.name, data.companyId);
+                }
+
+                try {
+                    logActivity(data.companyId, "System User", "UPDATED", "INVOICE", `Edited Invoice #${data.invoiceNo}. Adjusted to ₹${data.grandTotal}.`);
+                } catch(e) {}
+            })();
+            return { success: true };
+        } catch (error) {
+            console.error(error);
+            return { success: false, message: error.message || "Failed to edit invoice." };
+        }
+    });
+
+    // ==========================================
+    // EDIT PURCHASE BILL - TRUST WITH DISCREPANCY CHECK
+    // ==========================================
+    ipcMain.handle('edit-purchase', async (event, data) => {
+        try {
+            db.transaction(() => {
+                const oldPurchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(data.id, data.companyId);
+                if (!oldPurchase) throw new Error("Purchase bill not found");
+                const oldItems = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ?').all(data.id);
+
+                // --- NEW: THE DISCREPANCY CHECK ---
+                // For purchases, if amount_paid exceeds the new grand total, block it.
+                if (data.grandTotal < data.amountPaid) {
+                     throw new Error("Payment Discrepancy: The new total is less than what you already paid the vendor. Please delete this purchase bill completely and recreate it.");
+                }
+
+                const exactBalanceDue = data.grandTotal - data.amountPaid;
+
+                // Save Snapshot to Audit Trail
+                db.prepare(`INSERT INTO purchase_revisions (purchase_id, previous_data, edit_reason) VALUES (?, ?, ?)`).run(
+                    data.id, JSON.stringify({ purchase: oldPurchase, items: oldItems }), data.editReason || 'User edited purchase details'
+                );
+
+                // REVERT Old Stock
+                const revertStock = db.prepare(`UPDATE items SET current_stock = current_stock - ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
+                for (const item of oldItems) { revertStock.run(item.qty, item.item_name, data.companyId); }
+
+                // Update Purchase Main Record
+                db.prepare(`
+                    UPDATE purchases SET 
+                        bill_no=?, bill_date=?, party_name=?, phone=?, state_of_supply=?, subtotal=?, global_discount=?, 
+                        total_tax=?, round_off=?, grand_total=?, amount_paid=?, account_id=?, payment_type=?, balance_due=?, notes=?
+                    WHERE id=?
+                `).run(
+                    data.billNo, data.date, data.partyName, data.phone, data.stateOfSupply, data.subTotal, data.globalDiscount,
+                    data.totalTax, data.roundOff, data.grandTotal, data.amountPaid, data.accountId, data.paymentType, exactBalanceDue, data.notes, data.id
+                );
+
+                // Delete Old Items & ADD New Stock
+                db.prepare('DELETE FROM purchase_items WHERE purchase_id = ?').run(data.id);
+                const insertItem = db.prepare(`INSERT INTO purchase_items (purchase_id, item_name, qty, price, discount, tax_rate, amount, serial_no, warranty) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+                const addStock = db.prepare(`UPDATE items SET current_stock = current_stock + ? WHERE item_name = ? AND company_id = ? AND item_type = 'Product'`);
+                
+                for (const item of data.items) {
+                    insertItem.run(data.id, item.name, item.qty, item.price, item.discount, item.taxRate, item.amount, item.serialNo || "", item.warranty || "");
+                    addStock.run(item.qty, item.name, data.companyId);
+                }
+
+                try {
+                    logActivity(data.companyId, "System User", "UPDATED", "PURCHASE", `Edited Purchase Bill #${data.billNo}. Adjusted to ₹${data.grandTotal}.`);
+                } catch(e){}
+            })();
+            return { success: true };
+        } catch (error) {
+            console.error(error);
+            return { success: false, message: error.message || "Failed to edit purchase bill." };
         }
     });
 }); // Ends app.whenReady()

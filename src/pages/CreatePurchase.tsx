@@ -9,7 +9,8 @@ const INTERNAL_NOTES = [
   "Damaged goods noted and returned.", "Urgent stock replenishment."
 ];
 
-export function CreatePurchase({ companyId, onBack }: { companyId: string, onBack: () => void }) {
+// NEW: Added editData prop
+export function CreatePurchase({ companyId, onBack, editData }: { companyId: string, onBack: () => void, editData?: any }) {
   const [billNo, setBillNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [partyName, setPartyName] = useState('');
@@ -24,7 +25,8 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
   const [accounts, setAccounts] = useState<any[]>([]);
   const [companyDetails, setCompanyDetails] = useState<any>(null);
   
-  const [items, setItems] = useState([{ id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }]);
+  const [isQuotation, setIsQuotation] = useState(false);
+  const [items, setItems] = useState([{ id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
   
   const [globalDiscount, setGlobalDiscount] = useState<any>(0);
   const [roundOff, setRoundOff] = useState<any>(0);
@@ -48,7 +50,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
       const resAccounts = await window.electronAPI.getAccounts(Number(companyId));
       if (resAccounts.success) {
         setAccounts(resAccounts.data || []);
-        if (resAccounts.data && resAccounts.data.length > 0) setAccountId(resAccounts.data[0].id.toString());
+        if (resAccounts.data && resAccounts.data.length > 0 && !editData) setAccountId(resAccounts.data[0].id.toString());
       }
       const resCompany = await window.electronAPI.getCompany(Number(companyId));
       if (resCompany.success) setCompanyDetails(resCompany.data || null);
@@ -57,6 +59,21 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
     const shuffled = [...INTERNAL_NOTES].sort(() => 0.5 - Math.random());
     setSuggestedNotes(shuffled.slice(0, 5));
   }, [companyId]);
+
+  // NEW: Pre-fill form if in Edit Mode
+  useEffect(() => {
+    if (editData) {
+      setBillNo(editData.billNo);
+      setDate(editData.date);
+      setPartyName(editData.partyName);
+      setPhone(editData.phone || '');
+      setStateOfSupply(editData.stateOfSupply || '');
+      setNotes(editData.notes || '');
+      setItems(editData.items && editData.items.length > 0 ? editData.items : [{ id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
+      setAmountPaid(editData.paidAmount || 0);
+      setIsQuotation(false); 
+    }
+  }, [editData]);
 
   const calculateRowAmount = (qty: number, price: number, discount: number, taxRate: number) => {
     const base = (qty || 0) * (price || 0);
@@ -80,10 +97,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
     setItems(prev => prev.map(item => {
       if (item.id === id) {
         const up = { ...item, name: newName };
-        if (foundItem) {
-          up.price = foundItem.purchase_price; 
-          up.taxRate = foundItem.tax_rate;
-        }
+        if (foundItem) { up.price = foundItem.purchase_price; up.taxRate = foundItem.tax_rate; }
         up.amount = calculateRowAmount(Number(up.qty), Number(up.price), Number(up.discount), Number(up.taxRate));
         return up;
       }
@@ -97,7 +111,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
     if (foundParty) setPhone(foundParty.phone || '');
   };
 
-  const addRow = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }]);
+  const addRow = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
   const removeRow = (id: number) => { if (items.length > 1) setItems(items.filter(item => item.id !== id)); };
 
   const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>, id: number) => {
@@ -109,29 +123,23 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
 
       const updatedItems = [...items];
       let currentItem = { ...updatedItems[targetIndex] };
-      currentItem.serialNo = scannedCode;
-      currentItem.qty = 1;
+      currentItem.serialNo = scannedCode; currentItem.qty = 1; currentItem.warranty = '';
 
       const matchedItem = inventoryItems.find(i => i.item_code === scannedCode);
       if (matchedItem) {
-        currentItem.name = matchedItem.item_name;
-        currentItem.price = matchedItem.purchase_price || 0; 
-        currentItem.taxRate = matchedItem.tax_rate || 0;
+        currentItem.name = matchedItem.item_name; currentItem.price = matchedItem.purchase_price || 0; currentItem.taxRate = matchedItem.tax_rate || 0;
       }
 
       currentItem.amount = calculateRowAmount(Number(currentItem.qty), Number(currentItem.price), Number(currentItem.discount), Number(currentItem.taxRate));
       updatedItems[targetIndex] = currentItem;
 
-      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' };
+      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' };
       updatedItems.splice(targetIndex + 1, 0, newItem);
       setItems(updatedItems);
 
-      // FIX: Safely shift focus to the newly created row manually
       setTimeout(() => {
         const inputs = document.querySelectorAll<HTMLInputElement>('.barcode-input');
-        if (inputs.length > 0) {
-          inputs[inputs.length - 1].focus();
-        }
+        if (inputs.length > 0) inputs[inputs.length - 1].focus();
       }, 50);
     }
   };
@@ -143,20 +151,29 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
   const balanceDue = grandTotal - Number(amountPaid || 0);
 
   const handleSavePurchase = async () => {
+    if (isQuotation) { setShowPreview(true); return; }
     if (!partyName) return alert("Please enter a Supplier Name!");
     const validItems = items.filter(i => i.name.trim() !== '');
     if (validItems.length === 0) return alert("Please add at least one item!");
 
     const payload = {
+      id: editData?.id, // NEW: Include ID if editing
       companyId: Number(companyId), billNo: billNo || "N/A", date, partyName, phone, stateOfSupply,
       subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, roundOff: Number(roundOff || 0), grandTotal,
-      // FIX: Account ID strictly checked to prevent database crash when empty
       amountPaid: Number(amountPaid || 0), accountId: accountId ? Number(accountId) : null,
       paymentType: accounts.find(a => a.id.toString() === accountId)?.account_name || 'Cash', 
-      balanceDue, notes, items: validItems
+      balanceDue, notes, items: validItems,
+      editReason: 'Edited purchase details' // Used for Audit Trail
     };
 
-    const res = await window.electronAPI.addPurchase(payload);
+    // NEW: Branch API logic based on Add vs Edit
+    let res;
+    if (editData) {
+        res = await window.electronAPI.editPurchase(payload);
+    } else {
+        res = await window.electronAPI.addPurchase(payload);
+    }
+
     if (res.success) {
       setIsSaved(true);
       setShowPreview(true);
@@ -168,7 +185,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
       <div className="bg-white px-6 py-4 border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-center">
           <button onClick={onBack} className="mr-4 p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center"><ShoppingCart className="w-5 h-5 mr-2 text-blue-600" /> Purchase Bill</h1>
+          <h1 className="text-xl font-bold text-slate-800 flex items-center"><ShoppingCart className="w-5 h-5 mr-2 text-blue-600" /> {editData ? 'Edit Purchase Bill' : 'Purchase Bill'}</h1>
         </div>
       </div>
 
@@ -217,7 +234,8 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
                   <tr className="bg-slate-800 text-white text-xs uppercase tracking-wider">
                     <th className="px-4 py-3 w-12 text-center">#</th>
                     <th className="px-4 py-3 min-w-[180px]">Item Name</th>
-                    <th className="px-4 py-3 w-40 text-blue-300">Serial / Barcode</th>
+                    <th className="px-4 py-3 w-32 text-blue-300">Serial / Barcode</th>
+                    <th className="px-4 py-3 w-28 text-blue-300">Warranty</th>
                     <th className="px-4 py-3 w-20 text-center">Qty</th>
                     <th className="px-4 py-3 w-28 text-right">Price/Unit</th>
                     <th className="px-4 py-3 w-24 text-right">Disc.</th>
@@ -231,8 +249,8 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-4 py-2 text-center text-slate-400 text-sm font-medium">{index + 1}</td>
                       <td className="px-4 py-2"><input type="text" list="purchase-inventory-list" placeholder="Select item..." className="w-full px-2 py-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded outline-none" value={item.name} onChange={(e) => handleSmartNameChange(item.id, e.target.value)} /></td>
-                      {/* FIX: Removed autoFocus, added barcode-input class */}
                       <td className="px-4 py-2"><input type="text" placeholder="Scan Barcode" className="barcode-input w-full px-2 py-1.5 border border-blue-200 focus:border-blue-500 rounded outline-none bg-blue-50/50" value={item.serialNo} onChange={(e) => handleItemChange(item.id, 'serialNo', e.target.value)} onKeyDown={(e) => handleBarcodeScan(e, item.id)} /></td>
+                      <td className="px-4 py-2"><input type="text" placeholder="e.g. 1 Year" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500" value={item.warranty || ''} onChange={(e) => handleItemChange(item.id, 'warranty', e.target.value)} /></td>
                       <td className="px-4 py-2"><input type="number" min="1" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-center" value={item.qty || ''} onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)} /></td>
                       <td className="px-4 py-2"><input type="number" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-right" value={item.price || ''} onChange={(e) => handleItemChange(item.id, 'price', e.target.value)} /></td>
                       <td className="px-4 py-2"><div className="relative"><span className="absolute left-2 top-1.5 text-slate-400 text-sm">₹</span><input type="number" className="w-full pl-6 pr-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500" value={item.discount || ''} onChange={(e) => handleItemChange(item.id, 'discount', e.target.value)} /></div></td>
@@ -281,7 +299,7 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Amount Paid</label>
                      <div className="relative">
                        <IndianRupee className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                       <input type="number" className="w-full pl-9 pr-3 py-2 border border-emerald-300 bg-emerald-50 text-emerald-800 rounded-lg outline-none font-bold focus:ring-2 focus:ring-emerald-500" value={amountPaid || ''} onChange={(e) => setAmountPaid(e.target.value as any)} />
+                       <input type="number" className="w-full pl-9 pr-3 py-2 border border-emerald-300 bg-emerald-50 text-emerald-800 rounded-lg outline-none font-bold focus:ring-2 focus:ring-emerald-500" value={amountPaid === 0 ? '' : amountPaid} onChange={(e) => setAmountPaid(e.target.value as any)} />
                      </div>
                    </div>
                    <div className="flex-1">
@@ -302,8 +320,20 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
       </div>
 
       <div className="bg-white px-6 py-4 border-t border-slate-200 flex justify-between items-center shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <button onClick={() => setShowPreview(true)} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors flex items-center"><Eye className="w-4 h-4 mr-2" /> Preview</button>
-        <button onClick={handleSavePurchase} className="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center">Save Purchase Bill</button>
+        {!editData && (
+          <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-bold mr-4 select-none">
+            <input 
+              type="checkbox" className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+              checked={isQuotation} onChange={(e) => setIsQuotation(e.target.checked)}
+            />
+            Generate as Quotation
+          </label>
+        )}
+        
+        <div className="flex gap-4 ml-auto">
+          <button onClick={() => setShowPreview(true)} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors flex items-center"><Eye className="w-4 h-4 mr-2" /> Preview</button>
+          <button onClick={handleSavePurchase} className="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center">{isQuotation ? 'Preview Quotation' : (editData ? 'Update Purchase Bill' : 'Save Purchase Bill')}</button>
+        </div>
       </div>
 
       {showPreview && (
@@ -312,10 +342,9 @@ export function CreatePurchase({ companyId, onBack }: { companyId: string, onBac
           onClose={() => { setShowPreview(false); if (isSaved) onBack(); }} 
           settings={settings}
           invoiceData={{
-            type: 'Purchase', billNo: billNo || 'N/A', date, partyName, phone, stateOfSupply, companyDetails,
-            items: items.filter(i => i.name.trim() !== ''),
-            subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, roundOff: Number(roundOff || 0), grandTotal,
-            paidAmount: Number(amountPaid || 0), balanceDue, notes
+            isQuotation, type: 'Purchase', billNo: billNo || 'N/A', date, partyName, phone, stateOfSupply, companyDetails,
+            items: items.filter(i => i.name.trim() !== ''), subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, 
+            roundOff: Number(roundOff || 0), grandTotal, paidAmount: Number(amountPaid || 0), balanceDue, notes
           }} 
         />
       )}

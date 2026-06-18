@@ -281,6 +281,46 @@ try {
 }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN account_id INTEGER;`); } catch(e) {}
 // -----------------------------------
+try {
+    db.exec(`ALTER TABLE invoice_items ADD COLUMN serial_no TEXT DEFAULT '';`);
+    db.exec(`ALTER TABLE purchase_items ADD COLUMN serial_no TEXT DEFAULT '';`);
+} catch (err) {
+    // Ignore error if serial_no already exists
+}
+
+// --- NEW WARRANTY BLOCK (MUST BE IN ITS OWN TRY/CATCH) ---
+try {
+    db.exec(`ALTER TABLE invoice_items ADD COLUMN warranty TEXT DEFAULT '';`);
+    db.exec(`ALTER TABLE purchase_items ADD COLUMN warranty TEXT DEFAULT '';`);
+    console.log("✅ Warranty columns added successfully!");
+} catch (err) {
+    // Ignore error if warranty already exists
+}
+// --- NEW: AUDIT TRAIL REVISION TABLES ---
+try {
+    db.exec(`
+        CREATE TABLE IF NOT EXISTS invoice_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER NOT NULL,
+            revision_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            previous_data TEXT NOT NULL, -- JSON snapshot of old invoice
+            edit_reason TEXT,
+            FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS purchase_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            purchase_id INTEGER NOT NULL,
+            revision_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            previous_data TEXT NOT NULL, -- JSON snapshot of old purchase
+            edit_reason TEXT,
+            FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+        );
+    `);
+    console.log("✅ Audit Revision tables verified successfully!");
+} catch (err) {
+    console.error("Revision table error:", err);
+}
 console.log("Database initialized at:", dbPath);
 
 // Export it so your other files can use it

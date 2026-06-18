@@ -16,10 +16,11 @@ getCompany: (companyId) => ipcRenderer.invoke('get-company', companyId),
 addInvoice: (data) => ipcRenderer.invoke('add-invoice', data),
 getDashboardStats: (data) => ipcRenderer.invoke('get-dashboard-stats', data),
 // Add inside contextBridge:
-getInvoices: (companyId) => ipcRenderer.invoke('get-invoices', companyId),
+// Change these lines:
+getInvoices: (params) => ipcRenderer.invoke('get-invoices', params),
+getPurchases: (params) => ipcRenderer.invoke('get-purchases', params),
 // Add these inside the contextBridge:
 addPurchase: (data) => ipcRenderer.invoke('add-purchase', data),
-getPurchases: (companyId) => ipcRenderer.invoke('get-purchases', companyId),
 // --- INVENTORY ENDPOINTS ---
 // --- INVENTORY ENDPOINTS ---
 getUnits: () => ipcRenderer.invoke('get-units'),
@@ -52,6 +53,9 @@ recordInvoicePayment: (data) => ipcRenderer.invoke('record-invoice-payment', dat
 backupDatabase: () => ipcRenderer.invoke('backup-database'),
 getInvoicePayments: (id) => ipcRenderer.invoke('get-invoice-payments', id),
 getAccountStatement: (accountId) => ipcRenderer.invoke('get-account-statement', accountId),
+
+editInvoice: (data) => ipcRenderer.invoke('edit-invoice', data),
+editPurchase: (data) => ipcRenderer.invoke('edit-purchase', data),
 });
 
 // Expose Inventory API

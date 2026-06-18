@@ -26,9 +26,12 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(initialCompanyId || null);
   const [activeTab, setActiveTab] = useState<'home' | 'inventory' | 'invoices' | 'parties' | 'settings' | 'create-sale' | 'create-purchase' | 'cash-bank' | 'logs'>('home');
   
+  // NEW: State to hold the transaction data while switching screens
+  const [transactionToEdit, setTransactionToEdit] = useState<any>(null);
+
   const [isCompanyDropdownOpen, setIsCompanyDropdownOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false); // NEW: Profile Dropdown State
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
   
   const [systemAlerts, setSystemAlerts] = useState<any[]>([]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -89,13 +92,29 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
     }
   };
 
+  // NEW: Handler to catch the Edit trigger from TransactionHistory
+  const handleEditTransaction = (data: any) => {
+    setTransactionToEdit(data);
+    if (data.type === 'Sale') {
+      setActiveTab('create-sale');
+    } else if (data.type === 'Purchase') {
+      setActiveTab('create-purchase');
+    }
+  };
+
   const selectedCompany = companies.find(c => c.id.toString() === selectedCompanyId);
 
   const NavItem = ({ id, icon: Icon, label }: { id: any, icon: any, label: string }) => {
     const isActive = activeTab === id;
     return (
       <button 
-        onClick={() => setActiveTab(id)} 
+        onClick={() => {
+          setActiveTab(id);
+          // Optional: Clear edit state if they click a sidebar link midway through editing
+          if (id !== 'create-sale' && id !== 'create-purchase') {
+            setTransactionToEdit(null);
+          }
+        }} 
         title={isSidebarCollapsed ? label : ''}
         className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center px-0' : 'px-4'} py-3 mb-2 rounded-xl text-sm font-semibold transition-all ${
           isActive ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
@@ -122,7 +141,7 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
                 <LayoutGrid className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <h1 className="font-bold text-slate-900 leading-tight">BillingBuddy</h1>
+                <h1 className="font-bold text-slate-900 leading-tight">BillingBuddy by Adarsh</h1>
               </div>
             </div>
           )}
@@ -209,8 +228,8 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
           </div>
           
           <div className="flex items-center gap-4 relative">
-            <button onClick={() => setActiveTab('create-purchase')} className="px-4 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 rounded-lg text-sm font-bold transition-all shadow-sm">New Purchase</button>
-            <button onClick={() => setActiveTab('create-sale')} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-sm">Create Invoice</button>
+            <button onClick={() => { setActiveTab('create-purchase'); setTransactionToEdit(null); }} className="px-4 py-2 border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 hover:border-slate-300 rounded-lg text-sm font-bold transition-all shadow-sm">New Purchase</button>
+            <button onClick={() => { setActiveTab('create-sale'); setTransactionToEdit(null); }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-sm">Create Invoice</button>
             
             <div className="w-px h-6 bg-slate-200 mx-2"></div>
             
@@ -318,7 +337,15 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
           {selectedCompanyId && activeTab !== 'home' && (
             <div className="p-6 h-full animate-fade-in">
               {activeTab === 'parties' && <PartiesManagement companyId={selectedCompanyId} />}
-              {activeTab === 'invoices' && <TransactionHistory companyId={selectedCompanyId} />}
+              
+              {/* UPDATED: Pass the handler to TransactionHistory */}
+              {activeTab === 'invoices' && (
+                <TransactionHistory 
+                  companyId={selectedCompanyId} 
+                  onEditTransaction={handleEditTransaction} 
+                />
+              )}
+              
               {activeTab === 'inventory' && <InventoryManagement companyId={selectedCompanyId} />}
               {activeTab === 'settings' && <CustomTemplateSettings companyId={selectedCompanyId} />}
               {activeTab === 'cash-bank' && <CashBank companyId={selectedCompanyId} />}
@@ -326,15 +353,31 @@ export function DashboardLayout({ initialCompanyId, onLogout, onBackToSelection 
             </div>
           )}
 
+          {/* UPDATED: Pass editData to CreateInvoice and clear on back */}
           {selectedCompanyId && activeTab === 'create-sale' && (
             <div className="absolute inset-0 z-50 bg-[#f8fafc] animate-fade-in">
-              <CreateInvoice companyId={selectedCompanyId} onBack={() => setActiveTab('home')} />
+              <CreateInvoice 
+                companyId={selectedCompanyId} 
+                onBack={() => {
+                  setActiveTab('home');
+                  setTransactionToEdit(null);
+                }} 
+                editData={transactionToEdit}
+              />
             </div>
           )}
 
+          {/* UPDATED: Pass editData to CreatePurchase and clear on back */}
           {selectedCompanyId && activeTab === 'create-purchase' && (
             <div className="absolute inset-0 z-50 bg-[#f8fafc] animate-fade-in">
-              <CreatePurchase companyId={selectedCompanyId} onBack={() => setActiveTab('home')} />
+              <CreatePurchase 
+                companyId={selectedCompanyId} 
+                onBack={() => {
+                  setActiveTab('home');
+                  setTransactionToEdit(null);
+                }} 
+                editData={transactionToEdit}
+              />
             </div>
           )}
         </main>

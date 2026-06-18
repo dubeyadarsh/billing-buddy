@@ -65,10 +65,10 @@ getDashboardStats: (data: {
   summaryRange?: string; 
   timeRange?: string 
 }) => Promise<any>;// Add inside IAuthAPI:
-getInvoices: (companyId: number | string) => Promise<{ success: boolean; data?: any[]; message?: string }>;
+getInvoices: (params: { companyId: number; page?: number; limit?: number; searchTerm?: string }) => Promise<any>;
 // --- PURCHASE TYPES ---
 addPurchase: (data: any) => Promise<{ success: boolean; id?: number; message?: string }>;
-getPurchases: (companyId: number | string) => Promise<{ success: boolean; data?: any[]; message?: string }>;
+getPurchases: (params: { companyId: number; page?: number; limit?: number; searchTerm?: string }) => Promise<any>;
 // --- INVENTORY TYPES ---
 // --- INVENTORY TYPES ---
 getUnits: () => Promise<{ success: boolean; data?: any[]; message?: string }>;
@@ -117,6 +117,9 @@ sendWhatsappOtp: (data: { contact: string, otp: string }) => Promise<{ success: 
 backupDatabase: () => Promise<{ success: boolean; message?: string }>;
   getInvoicePayments: (invoiceId: number) => Promise<{ success: boolean; data?: any[]; message?: string }>;
   getAccountStatement: (accountId: number) => Promise<{ success: boolean; data?: any[]; message?: string }>;
+
+  editInvoice: (data: any) => Promise<any>;
+    editPurchase: (data: any) => Promise<any>;
 }
 
 // ==========================================

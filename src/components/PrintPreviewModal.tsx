@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Printer, LayoutTemplate } from 'lucide-react';
+import { X, Printer, LayoutTemplate, Edit } from 'lucide-react';
 import { InvoiceTemplate } from './templates/InvoiceTemplate';
 import { TemplateModern } from './templates/TemplateModern';
 import { TemplateThermal } from './templates/TemplateThermal';
@@ -9,11 +9,12 @@ import type { InvoiceData } from '../types/invoice';
 interface PrintModalProps {
   isOpen: boolean;
   onClose: () => void;
-  invoiceData: InvoiceData;
+  invoiceData: InvoiceData | any;
   settings: any;
+  onEdit?: () => void; // NEW: Added onEdit prop
 }
 
-export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, invoiceData, settings }) => {
+export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, invoiceData, settings, onEdit }) => {
   const [selectedTemplate, setSelectedTemplate] = useState<'standard' | 'modern' | 'thermal'>('standard');
 
   if (!isOpen) return null;
@@ -21,10 +22,6 @@ export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, 
   const modalContent = (
     <div className="fixed inset-0 z-[9999] flex bg-slate-900/60 backdrop-blur-sm print:static print:block print:h-auto print:bg-white print:backdrop-blur-none animate-in fade-in">
       
-      {/* CRITICAL FIX: 
-        This style block applies only during printing. It allows multi-page scrolling 
-        and explicitly hides the background app (#root) so it doesn't bleed into the PDF.
-      */}
       <style>
         {`
           @media print {
@@ -76,10 +73,17 @@ export const PrintPreviewModal: React.FC<PrintModalProps> = ({ isOpen, onClose, 
             </button>
           </div>
         </div>
-        <div className="p-6 border-t border-slate-200 bg-slate-50">
+        <div className="p-6 border-t border-slate-200 bg-slate-50 space-y-3">
           <button onClick={() => window.print()} className="w-full flex items-center justify-center gap-2 bg-blue-600 text-white py-3.5 rounded-xl font-bold hover:bg-blue-700 shadow-sm transition-all hover:-translate-y-0.5">
             <Printer className="w-5 h-5" /> Print / Save PDF
           </button>
+          
+          {/* NEW: Edit Button */}
+          {onEdit && (
+            <button onClick={onEdit} className="w-full flex items-center justify-center gap-2 bg-amber-500 text-white py-3.5 rounded-xl font-bold hover:bg-amber-600 shadow-sm transition-all hover:-translate-y-0.5">
+              <Edit className="w-5 h-5" /> Edit Transaction
+            </button>
+          )}
         </div>
       </div>
 

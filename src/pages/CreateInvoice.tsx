@@ -3,7 +3,8 @@ import { ArrowLeft, Plus, Trash2, Eye, Save } from 'lucide-react';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
 import { INDIAN_STATES, THANK_YOU_MESSAGES } from '../utils/messages';
 
-export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack: () => void }) {
+// NEW: Added editData prop
+export function CreateInvoice({ companyId, onBack, editData }: { companyId: string, onBack: () => void, editData?: any }) {
   const [invoiceNo, setInvoiceNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [partyName, setPartyName] = useState('');
@@ -21,11 +22,12 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
   const [accounts, setAccounts] = useState<any[]>([]);
   const [suggestedNotes, setSuggestedNotes] = useState<string[]>([]);
   
+  const [isQuotation, setIsQuotation] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
   const [items, setItems] = useState([
-    { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }
+    { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }
   ]);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
       if (setRes?.success) setSettings(setRes.settings || null);
 
       const invNoRes = await window.electronAPI.getNextInvoiceNo(companyId);
-      if (invNoRes?.success) setInvoiceNo(invNoRes.nextNo || '');
+      if (invNoRes?.success && !editData) setInvoiceNo(invNoRes.nextNo || '');
 
       const partiesRes = await window.electronAPI.getParties(companyId);
       if (partiesRes?.success) setPartiesList(partiesRes.data || []); 
@@ -49,12 +51,27 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
       const accRes = await window.electronAPI.getAccounts(companyId);
       if (accRes?.success) {
         setAccounts(accRes.data || []);
-        if (accRes.data && accRes.data.length > 0) setAccountId(accRes.data[0].id);
+        if (accRes.data && accRes.data.length > 0 && !editData) setAccountId(accRes.data[0].id);
       }
     };
     fetchMasterData();
     if (THANK_YOU_MESSAGES) setSuggestedNotes([...THANK_YOU_MESSAGES].sort(() => 0.5 - Math.random()).slice(0, 5));
   }, [companyId]);
+
+  // NEW: Pre-fill form if in Edit Mode
+  useEffect(() => {
+    if (editData) {
+      setInvoiceNo(editData.billNo);
+      setDate(editData.date);
+      setPartyName(editData.partyName);
+      setPhone(editData.phone || '');
+      setStateOfSupply(editData.stateOfSupply || '');
+      setNotes(editData.notes || '');
+      setItems(editData.items && editData.items.length > 0 ? editData.items : [{ id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
+      setAmountReceived(editData.paidAmount || 0);
+      setIsQuotation(false); 
+    }
+  }, [editData]);
 
   const handlePartyChange = (name: string) => {
     setPartyName(name);
@@ -84,18 +101,18 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
     setItems(updatedItems);
   };
 
-  const addItem = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' }]);
+  const addItem = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
   const removeItem = (index: number) => { if (items.length > 1) setItems(items.filter((_, i) => i !== index)); };
 
   const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
     if (e.key === 'Enter') {
       e.preventDefault(); 
       const scannedCode = e.currentTarget.value;
-      
       const updatedItems = [...items];
       let currentItem = { ...updatedItems[index] };
       currentItem.serialNo = scannedCode;
       currentItem.qty = 1;
+      currentItem.warranty = '';
 
       const matchedItem = inventoryItems.find(i => i.item_code === scannedCode);
       if (matchedItem) {
@@ -103,24 +120,17 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
         currentItem.price = matchedItem.sale_price;
         currentItem.taxRate = matchedItem.tax_rate;
       }
-      const qty = Number(currentItem.qty) || 0;
-      const price = Number(currentItem.price) || 0;
-      const discount = Number(currentItem.discount) || 0;
-      const taxRate = Number(currentItem.taxRate) || 0;
-      const baseAmt = (qty * price) - discount;
-      currentItem.amount = baseAmt + (baseAmt * (taxRate / 100));
+      const baseAmt = (Number(currentItem.qty) * Number(currentItem.price)) - Number(currentItem.discount);
+      currentItem.amount = baseAmt + (baseAmt * (Number(currentItem.taxRate) / 100));
 
       updatedItems[index] = currentItem;
-      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '' };
+      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' };
       updatedItems.splice(index + 1, 0, newItem);
       setItems(updatedItems);
 
-      // FIX: Safely shift focus to the newly created row manually
       setTimeout(() => {
         const inputs = document.querySelectorAll<HTMLInputElement>('.barcode-input');
-        if (inputs.length > 0) {
-          inputs[inputs.length - 1].focus();
-        }
+        if (inputs.length > 0) inputs[inputs.length - 1].focus();
       }, 50);
     }
   };
@@ -142,19 +152,29 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
   }, [items, amountReceived]);
 
   const handleSaveInvoice = async () => {
+    if (isQuotation) { setShowPreview(true); return; }
     if (!partyName) return alert("Please enter a Customer Name!");
     const validItems = items.filter(i => i.name.trim() !== '');
     if (validItems.length === 0) return alert("Please add at least one item!");
 
     const data = {
-      companyId, invoiceNo, date, partyName, phone, stateOfSupply, notes, items: validItems, 
+      id: editData?.id, // NEW: Include ID if editing
+      companyId: Number(companyId), invoiceNo, date, partyName, phone, stateOfSupply, notes, items: validItems, 
       subTotal: totals.subTotal, globalDiscount: totals.totalDiscount, totalTax: totals.totalTax, 
       roundOff: totals.roundOff, grandTotal: totals.grandTotal, amountReceived, 
-      accountId, paymentType: accounts.find(a => a.id === accountId)?.account_name || '',
-      balanceDue: totals.balanceDue
+      accountId, paymentType: accounts.find(a => a.id === accountId)?.account_name || 'Cash',
+      balanceDue: totals.balanceDue,
+      editReason: 'Edited bill details' // Used for Audit Trail
     };
 
-    const res = await window.electronAPI.addInvoice(data);
+    // NEW: Branch API logic based on Add vs Edit
+    let res;
+    if (editData) {
+        res = await window.electronAPI.editInvoice(data);
+    } else {
+        res = await window.electronAPI.addInvoice(data);
+    }
+
     if (res.success) {
       setIsSaved(true);
       setShowPreview(true);
@@ -169,7 +189,7 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
       <div className="bg-white px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ArrowLeft className="w-5 h-5 text-slate-600" /></button>
-          <h1 className="text-xl font-bold text-slate-800">Create Sale Invoice</h1>
+          <h1 className="text-xl font-bold text-slate-800">{editData ? 'Edit Sale Invoice' : 'Create Sale Invoice'}</h1>
         </div>
       </div>
 
@@ -209,6 +229,7 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
                     <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-10 text-center">#</th>
                     <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[200px]">Item Name</th>
                     <th className="py-3 px-4 text-xs font-bold text-blue-600 uppercase tracking-wider w-40">Serial / Barcode</th>
+                    <th className="py-3 px-4 text-xs font-bold text-blue-600 uppercase tracking-wider w-32">Warranty</th>
                     <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-24 text-center">Qty</th>
                     <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-32 text-right">Rate</th>
                     <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-28 text-right">Disc.</th>
@@ -222,8 +243,8 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                       <td className="py-2 px-4 text-center text-slate-400">{index + 1}</td>
                       <td className="py-2 px-4"><input type="text" list="items-list" placeholder="Search Item" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none bg-transparent focus:bg-white" value={item.name} onChange={(e) => updateItem(index, 'name', e.target.value)} /></td>
-                      {/* FIX: Removed autoFocus, added barcode-input class */}
                       <td className="py-2 px-4"><input type="text" placeholder="Scan Barcode" className="barcode-input w-full px-3 py-2 border border-blue-200 focus:border-blue-500 rounded-lg outline-none bg-blue-50/50" value={item.serialNo} onChange={(e) => updateItem(index, 'serialNo', e.target.value)} onKeyDown={(e) => handleBarcodeScan(e, index)} /></td>
+                      <td className="py-2 px-4"><input type="text" placeholder="e.g. 6 Months" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none bg-transparent focus:bg-white" value={item.warranty || ''} onChange={(e) => updateItem(index, 'warranty', e.target.value)} /></td>
                       <td className="py-2 px-4"><input type="number" min="1" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none text-center bg-transparent focus:bg-white" value={item.qty || ''} onChange={(e) => updateItem(index, 'qty', e.target.value)} /></td>
                       <td className="py-2 px-4"><input type="number" min="0" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none text-right bg-transparent focus:bg-white" value={item.price || ''} onChange={(e) => updateItem(index, 'price', e.target.value)} /></td>
                       <td className="py-2 px-4"><input type="number" min="0" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none text-right bg-transparent focus:bg-white" value={item.discount || ''} onChange={(e) => updateItem(index, 'discount', e.target.value)} /></td>
@@ -270,7 +291,7 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
                     </select>
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-slate-700 text-sm">Amount Received</span>
-                      <input type="number" className="w-28 px-3 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-right font-bold text-blue-600 bg-blue-50/50" value={amountReceived || ''} onChange={(e) => setAmountReceived(Number(e.target.value))} placeholder="0.00" />
+                      <input type="number" className="w-28 px-3 py-1.5 border border-slate-200 rounded-lg outline-none focus:border-blue-500 text-right font-bold text-blue-600 bg-blue-50/50" value={amountReceived === 0 ? '' : amountReceived} onChange={(e) => setAmountReceived(Number(e.target.value))} placeholder="0.00" />
                     </div>
                  </div>
                  
@@ -285,8 +306,20 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
       </div>
 
       <div className="bg-white px-6 py-4 border-t border-slate-200 flex justify-between items-center shrink-0 z-10 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <button onClick={() => setShowPreview(true)} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors flex items-center"><Eye className="w-4 h-4 mr-2" /> Preview</button>
-        <button onClick={handleSaveInvoice} className="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center"><Save className="w-4 h-4 mr-2" /> Save Sale Invoice</button>
+        {!editData && (
+          <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-bold mr-4 select-none">
+            <input 
+              type="checkbox" className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+              checked={isQuotation} onChange={(e) => setIsQuotation(e.target.checked)}
+            />
+            Generate as Quotation
+          </label>
+        )}
+        
+        <div className="flex gap-4 ml-auto">
+          <button onClick={() => setShowPreview(true)} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg transition-colors flex items-center"><Eye className="w-4 h-4 mr-2" /> Preview</button>
+          <button onClick={handleSaveInvoice} className="px-8 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-sm transition-colors flex items-center"><Save className="w-4 h-4 mr-2" /> {isQuotation ? 'Preview Quotation' : (editData ? 'Update Invoice' : 'Save Sale Invoice')}</button>
+        </div>
       </div>
 
       {showPreview && (
@@ -295,7 +328,7 @@ export function CreateInvoice({ companyId, onBack }: { companyId: string, onBack
           onClose={() => { setShowPreview(false); if (isSaved) onBack(); }} 
           settings={settings}
           invoiceData={{
-            type: 'Sale', billNo: invoiceNo, date, partyName, phone, stateOfSupply, companyDetails, items, 
+            isQuotation, type: 'Sale', billNo: invoiceNo, date, partyName, phone, stateOfSupply, companyDetails, items, 
             subTotal: totals.subTotal, globalDiscount: totals.totalDiscount, totalTax: totals.totalTax, 
             roundOff: totals.roundOff, grandTotal: totals.grandTotal, paidAmount: amountReceived, 
             balanceDue: totals.balanceDue, notes 
