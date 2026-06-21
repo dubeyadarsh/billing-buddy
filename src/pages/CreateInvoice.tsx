@@ -3,9 +3,8 @@ import { ArrowLeft, Plus, Trash2, Eye, Save } from 'lucide-react';
 import { PrintPreviewModal } from '../components/PrintPreviewModal';
 import { INDIAN_STATES, THANK_YOU_MESSAGES } from '../utils/messages';
 
-// NEW: Added editData prop
 export function CreateInvoice({ companyId, onBack, editData }: { companyId: string, onBack: () => void, editData?: any }) {
-  const [invoiceNo, setInvoiceNo] = useState('');
+const [invoiceNo, setInvoiceNo] = useState(`INV-${Date.now()}`);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [partyName, setPartyName] = useState('');
   const [phone, setPhone] = useState('');
@@ -40,7 +39,7 @@ export function CreateInvoice({ companyId, onBack, editData }: { companyId: stri
       if (setRes?.success) setSettings(setRes.settings || null);
 
       const invNoRes = await window.electronAPI.getNextInvoiceNo(companyId);
-      if (invNoRes?.success && !editData) setInvoiceNo(invNoRes.nextNo || '');
+      if (invNoRes?.success && !editData) setInvoiceNo('INV-'+ invNoRes.nextNo || '');
 
       const partiesRes = await window.electronAPI.getParties(companyId);
       if (partiesRes?.success) setPartiesList(partiesRes.data || []); 
@@ -58,7 +57,6 @@ export function CreateInvoice({ companyId, onBack, editData }: { companyId: stri
     if (THANK_YOU_MESSAGES) setSuggestedNotes([...THANK_YOU_MESSAGES].sort(() => 0.5 - Math.random()).slice(0, 5));
   }, [companyId]);
 
-  // NEW: Pre-fill form if in Edit Mode
   useEffect(() => {
     if (editData) {
       setInvoiceNo(editData.billNo);
@@ -80,58 +78,63 @@ export function CreateInvoice({ companyId, onBack, editData }: { companyId: stri
   };
 
   const updateItem = (index: number, field: string, value: string | number) => {
-    const updatedItems = [...items];
-    const item = { ...updatedItems[index], [field]: value };
-    
-    if (field === 'name') {
-      const matchedItem = inventoryItems.find(i => i.item_name === value);
-      if (matchedItem) {
-        item.price = matchedItem.sale_price || 0;
-        item.taxRate = matchedItem.tax_rate || 0;
+    setItems(prevItems => {
+      const updatedItems = [...prevItems];
+      const item = { ...updatedItems[index], [field]: value };
+      
+      if (field === 'name') {
+        const matchedItem = inventoryItems.find(i => i.item_name === value);
+        if (matchedItem) {
+          item.price = matchedItem.sale_price || 0;
+          item.taxRate = matchedItem.tax_rate || 0;
+        }
       }
-    }
-    const qty = Number(item.qty) || 0;
-    const price = Number(item.price) || 0;
-    const discount = Number(item.discount) || 0;
-    const taxRate = Number(item.taxRate) || 0;
-    const baseAmt = (qty * price) - discount;
-    item.amount = baseAmt + (baseAmt * (taxRate / 100));
-    
-    updatedItems[index] = item;
-    setItems(updatedItems);
+
+      if (field === 'serialNo') {
+        const serials = String(value).split('\n').filter(s => s.trim() !== '');
+        item.qty = serials.length > 0 ? serials.length : 1; 
+      }
+      
+      const qty = Number(item.qty) || 0;
+      const price = Number(item.price) || 0;
+      const discount = Number(item.discount) || 0;
+      const taxRate = Number(item.taxRate) || 0;
+      const baseAmt = (qty * price) - discount;
+      item.amount = baseAmt + (baseAmt * (taxRate / 100));
+      
+      updatedItems[index] = item;
+      return updatedItems;
+    });
   };
 
   const addItem = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
   const removeItem = (index: number) => { if (items.length > 1) setItems(items.filter((_, i) => i !== index)); };
 
-  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
+  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLTextAreaElement>, index: number) => {
     if (e.key === 'Enter') {
-      e.preventDefault(); 
-      const scannedCode = e.currentTarget.value;
-      const updatedItems = [...items];
-      let currentItem = { ...updatedItems[index] };
-      currentItem.serialNo = scannedCode;
-      currentItem.qty = 1;
-      currentItem.warranty = '';
+      setItems(prevItems => {
+        const updatedItems = [...prevItems];
+        let currentItem = { ...updatedItems[index] };
+        
+        const serials = currentItem.serialNo.split('\n').filter(s => s.trim() !== '');
+        const latestCode = serials[serials.length - 1];
 
-      const matchedItem = inventoryItems.find(i => i.item_code === scannedCode);
-      if (matchedItem) {
-        currentItem.name = matchedItem.item_name;
-        currentItem.price = matchedItem.sale_price;
-        currentItem.taxRate = matchedItem.tax_rate;
-      }
-      const baseAmt = (Number(currentItem.qty) * Number(currentItem.price)) - Number(currentItem.discount);
-      currentItem.amount = baseAmt + (baseAmt * (Number(currentItem.taxRate) / 100));
+        if (latestCode && serials.length === 1) {
+          const matchedItem = inventoryItems.find(i => i.item_code === latestCode);
+          if (matchedItem) {
+            currentItem.name = matchedItem.item_name;
+            currentItem.price = matchedItem.sale_price || 0;
+            currentItem.taxRate = matchedItem.tax_rate || 0;
+            
+            const qty = Number(currentItem.qty) || 1;
+            const baseAmt = (qty * Number(currentItem.price)) - Number(currentItem.discount);
+            currentItem.amount = baseAmt + (baseAmt * (Number(currentItem.taxRate) / 100));
+          }
+        }
 
-      updatedItems[index] = currentItem;
-      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' };
-      updatedItems.splice(index + 1, 0, newItem);
-      setItems(updatedItems);
-
-      setTimeout(() => {
-        const inputs = document.querySelectorAll<HTMLInputElement>('.barcode-input');
-        if (inputs.length > 0) inputs[inputs.length - 1].focus();
-      }, 50);
+        updatedItems[index] = currentItem;
+        return updatedItems;
+      });
     }
   };
 
@@ -158,16 +161,15 @@ export function CreateInvoice({ companyId, onBack, editData }: { companyId: stri
     if (validItems.length === 0) return alert("Please add at least one item!");
 
     const data = {
-      id: editData?.id, // NEW: Include ID if editing
+      id: editData?.id,
       companyId: Number(companyId), invoiceNo, date, partyName, phone, stateOfSupply, notes, items: validItems, 
       subTotal: totals.subTotal, globalDiscount: totals.totalDiscount, totalTax: totals.totalTax, 
       roundOff: totals.roundOff, grandTotal: totals.grandTotal, amountReceived, 
       accountId, paymentType: accounts.find(a => a.id === accountId)?.account_name || 'Cash',
       balanceDue: totals.balanceDue,
-      editReason: 'Edited bill details' // Used for Audit Trail
+      editReason: 'Edited bill details'
     };
 
-    // NEW: Branch API logic based on Add vs Edit
     let res;
     if (editData) {
         res = await window.electronAPI.editInvoice(data);
@@ -243,7 +245,17 @@ export function CreateInvoice({ companyId, onBack, editData }: { companyId: stri
                     <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
                       <td className="py-2 px-4 text-center text-slate-400">{index + 1}</td>
                       <td className="py-2 px-4"><input type="text" list="items-list" placeholder="Search Item" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none bg-transparent focus:bg-white" value={item.name} onChange={(e) => updateItem(index, 'name', e.target.value)} /></td>
-                      <td className="py-2 px-4"><input type="text" placeholder="Scan Barcode" className="barcode-input w-full px-3 py-2 border border-blue-200 focus:border-blue-500 rounded-lg outline-none bg-blue-50/50" value={item.serialNo} onChange={(e) => updateItem(index, 'serialNo', e.target.value)} onKeyDown={(e) => handleBarcodeScan(e, index)} /></td>
+                      <td className="py-2 px-4 align-top">
+                        <textarea 
+                          rows={item.serialNo ? item.serialNo.split('\n').length : 1}
+                          placeholder="Scan Barcodes" 
+                          className="barcode-input w-full px-3 py-2 border border-blue-200 focus:border-blue-500 rounded-lg outline-none bg-blue-50/50 resize-none overflow-hidden block" 
+                          style={{ minHeight: '42px' }}
+                          value={item.serialNo} 
+                          onChange={(e) => updateItem(index, 'serialNo', e.target.value)} 
+                          onKeyDown={(e) => handleBarcodeScan(e, index)} 
+                        />
+                      </td>                      
                       <td className="py-2 px-4"><input type="text" placeholder="e.g. 6 Months" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none bg-transparent focus:bg-white" value={item.warranty || ''} onChange={(e) => updateItem(index, 'warranty', e.target.value)} /></td>
                       <td className="py-2 px-4"><input type="number" min="1" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none text-center bg-transparent focus:bg-white" value={item.qty || ''} onChange={(e) => updateItem(index, 'qty', e.target.value)} /></td>
                       <td className="py-2 px-4"><input type="number" min="0" className="w-full px-3 py-2 border border-transparent hover:border-slate-200 focus:border-blue-500 rounded-lg outline-none text-right bg-transparent focus:bg-white" value={item.price || ''} onChange={(e) => updateItem(index, 'price', e.target.value)} /></td>

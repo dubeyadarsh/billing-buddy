@@ -9,9 +9,8 @@ const INTERNAL_NOTES = [
   "Damaged goods noted and returned.", "Urgent stock replenishment."
 ];
 
-// NEW: Added editData prop
 export function CreatePurchase({ companyId, onBack, editData }: { companyId: string, onBack: () => void, editData?: any }) {
-  const [billNo, setBillNo] = useState('');
+const [billNo, setBillNo] = useState(`PUR-${Date.now()}`);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [partyName, setPartyName] = useState('');
   const [phone, setPhone] = useState('');
@@ -60,7 +59,6 @@ export function CreatePurchase({ companyId, onBack, editData }: { companyId: str
     setSuggestedNotes(shuffled.slice(0, 5));
   }, [companyId]);
 
-  // NEW: Pre-fill form if in Edit Mode
   useEffect(() => {
     if (editData) {
       setBillNo(editData.billNo);
@@ -85,6 +83,12 @@ export function CreatePurchase({ companyId, onBack, editData }: { companyId: str
     setItems(prev => prev.map(item => {
       if (item.id === id) {
         const up = { ...item, [field]: value };
+        
+        if (field === 'serialNo') {
+          const serials = String(value).split('\n').filter(s => s.trim() !== '');
+          up.qty = serials.length > 0 ? serials.length : 1; 
+        }
+
         up.amount = calculateRowAmount(Number(up.qty), Number(up.price), Number(up.discount), Number(up.taxRate));
         return up;
       }
@@ -114,33 +118,30 @@ export function CreatePurchase({ companyId, onBack, editData }: { companyId: str
   const addRow = () => setItems([...items, { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' }]);
   const removeRow = (id: number) => { if (items.length > 1) setItems(items.filter(item => item.id !== id)); };
 
-  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>, id: number) => {
+  const handleBarcodeScan = (e: React.KeyboardEvent<HTMLTextAreaElement>, id: number) => {
     if (e.key === 'Enter') {
-      e.preventDefault(); 
-      const scannedCode = e.currentTarget.value;
-      const targetIndex = items.findIndex(i => i.id === id);
-      if (targetIndex === -1) return;
+      setItems(prevItems => prevItems.map(item => {
+        if (item.id === id) {
+          const serials = item.serialNo.split('\n').filter(s => s.trim() !== '');
+          const latestCode = serials[serials.length - 1];
 
-      const updatedItems = [...items];
-      let currentItem = { ...updatedItems[targetIndex] };
-      currentItem.serialNo = scannedCode; currentItem.qty = 1; currentItem.warranty = '';
-
-      const matchedItem = inventoryItems.find(i => i.item_code === scannedCode);
-      if (matchedItem) {
-        currentItem.name = matchedItem.item_name; currentItem.price = matchedItem.purchase_price || 0; currentItem.taxRate = matchedItem.tax_rate || 0;
-      }
-
-      currentItem.amount = calculateRowAmount(Number(currentItem.qty), Number(currentItem.price), Number(currentItem.discount), Number(currentItem.taxRate));
-      updatedItems[targetIndex] = currentItem;
-
-      const newItem = { id: Date.now(), name: '', qty: 1, price: 0, discount: 0, taxRate: 0, amount: 0, serialNo: '', warranty: '' };
-      updatedItems.splice(targetIndex + 1, 0, newItem);
-      setItems(updatedItems);
-
-      setTimeout(() => {
-        const inputs = document.querySelectorAll<HTMLInputElement>('.barcode-input');
-        if (inputs.length > 0) inputs[inputs.length - 1].focus();
-      }, 50);
+          if (latestCode && serials.length === 1) {
+            const matchedItem = inventoryItems.find(i => i.item_code === latestCode);
+            if (matchedItem) {
+              const up = { 
+                ...item, 
+                name: matchedItem.item_name, 
+                price: matchedItem.purchase_price || 0, 
+                taxRate: matchedItem.tax_rate || 0 
+              };
+              const currentQty = Number(up.qty) || 1;
+              up.amount = calculateRowAmount(currentQty, Number(up.price), Number(up.discount), Number(up.taxRate));
+              return up;
+            }
+          }
+        }
+        return item;
+      }));
     }
   };
 
@@ -157,16 +158,15 @@ export function CreatePurchase({ companyId, onBack, editData }: { companyId: str
     if (validItems.length === 0) return alert("Please add at least one item!");
 
     const payload = {
-      id: editData?.id, // NEW: Include ID if editing
+      id: editData?.id,
       companyId: Number(companyId), billNo: billNo || "N/A", date, partyName, phone, stateOfSupply,
       subTotal, globalDiscount: Number(globalDiscount || 0), totalTax, roundOff: Number(roundOff || 0), grandTotal,
       amountPaid: Number(amountPaid || 0), accountId: accountId ? Number(accountId) : null,
       paymentType: accounts.find(a => a.id.toString() === accountId)?.account_name || 'Cash', 
       balanceDue, notes, items: validItems,
-      editReason: 'Edited purchase details' // Used for Audit Trail
+      editReason: 'Edited purchase details'
     };
 
-    // NEW: Branch API logic based on Add vs Edit
     let res;
     if (editData) {
         res = await window.electronAPI.editPurchase(payload);
@@ -249,7 +249,17 @@ export function CreatePurchase({ companyId, onBack, editData }: { companyId: str
                     <tr key={item.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="px-4 py-2 text-center text-slate-400 text-sm font-medium">{index + 1}</td>
                       <td className="px-4 py-2"><input type="text" list="purchase-inventory-list" placeholder="Select item..." className="w-full px-2 py-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 rounded outline-none" value={item.name} onChange={(e) => handleSmartNameChange(item.id, e.target.value)} /></td>
-                      <td className="px-4 py-2"><input type="text" placeholder="Scan Barcode" className="barcode-input w-full px-2 py-1.5 border border-blue-200 focus:border-blue-500 rounded outline-none bg-blue-50/50" value={item.serialNo} onChange={(e) => handleItemChange(item.id, 'serialNo', e.target.value)} onKeyDown={(e) => handleBarcodeScan(e, item.id)} /></td>
+                      <td className="px-4 py-2 align-top">
+                        <textarea 
+                          rows={item.serialNo ? item.serialNo.split('\n').length : 1}
+                          placeholder="Scan Barcodes" 
+                          className="barcode-input w-full px-2 py-1.5 border border-blue-200 focus:border-blue-500 rounded outline-none bg-blue-50/50 resize-none overflow-hidden block" 
+                          style={{ minHeight: '34px' }}
+                          value={item.serialNo} 
+                          onChange={(e) => handleItemChange(item.id, 'serialNo', e.target.value)} 
+                          onKeyDown={(e) => handleBarcodeScan(e, item.id)} 
+                        />
+                      </td>
                       <td className="px-4 py-2"><input type="text" placeholder="e.g. 1 Year" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500" value={item.warranty || ''} onChange={(e) => handleItemChange(item.id, 'warranty', e.target.value)} /></td>
                       <td className="px-4 py-2"><input type="number" min="1" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-center" value={item.qty || ''} onChange={(e) => handleItemChange(item.id, 'qty', e.target.value)} /></td>
                       <td className="px-4 py-2"><input type="number" className="w-full px-2 py-1.5 border border-slate-200 rounded outline-none focus:border-blue-500 text-right" value={item.price || ''} onChange={(e) => handleItemChange(item.id, 'price', e.target.value)} /></td>
