@@ -334,25 +334,16 @@ setupAutoUpdater();
     // ==========================================
     // 7. INVOICES (SALES)
     // ==========================================
-    ipcMain.handle('get-next-invoice-no', async (event, companyId) => {
-        try {
-            const lastInvoice = db.prepare(`SELECT invoice_no FROM invoices WHERE company_id = ? ORDER BY id DESC LIMIT 1`).get(companyId);
-            let nextNo = "1";
-            if (lastInvoice && lastInvoice.invoice_no) {
-                const match = lastInvoice.invoice_no.match(/\d+$/);
-                if (match) {
-                    const numStr = match[0];
-                    const prefix = lastInvoice.invoice_no.substring(0, lastInvoice.invoice_no.length - numStr.length);
-                    nextNo = prefix + (parseInt(numStr, 10) + 1).toString().padStart(numStr.length, '0');
-                } else {
-                    nextNo = lastInvoice.invoice_no + "-1";
-                }
-            }
-            return { success: true, nextNo };
-        } catch (error) {
-            return { success: true, nextNo: "1" };
-        }
-    });
+ ipcMain.handle('get-next-invoice-no', async (event, companyId) => {
+    try {
+        const row = db.prepare(`SELECT MAX(id) as maxId FROM invoices`).get();
+        const nextId = (row && row.maxId ? row.maxId : 0) + 1;
+        return { success: true, nextNo: nextId };
+    } catch (error) {
+        console.error("Error fetching next invoice ID:", error);
+        return { success: false, nextNo: Date.now() };
+    }
+});
 
     ipcMain.handle('add-invoice', async (event, data) => {
         try {

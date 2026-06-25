@@ -38,9 +38,11 @@ const [invoiceNo, setInvoiceNo] = useState(`INV-${Date.now()}`);
       const setRes = await window.electronAPI.getCompanySettings(companyId);
       if (setRes?.success) setSettings(setRes.settings || null);
 
-      const invNoRes = await window.electronAPI.getNextInvoiceNo(companyId);
-      if (invNoRes?.success && !editData) setInvoiceNo('INV-'+ invNoRes.nextNo || '');
-
+const invNoRes = await window.electronAPI.getNextInvoiceNo(companyId);
+      if (invNoRes?.success && !editData) {
+        const nextId = invNoRes.nextNo || Date.now();
+        setInvoiceNo(`INV-${nextId}`);
+      }
       const partiesRes = await window.electronAPI.getParties(companyId);
       if (partiesRes?.success) setPartiesList(partiesRes.data || []); 
 
